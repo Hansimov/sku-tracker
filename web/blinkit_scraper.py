@@ -1,86 +1,36 @@
-import urllib.parse
-
 from DrissionPage import Chromium, ChromiumOptions, SessionPage
 from tclogger import logger, logstr, brk, dict_to_str, dict_get
 from typing import Union
 from pyvirtualdisplay import Display
 
-
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
-
-BLINKIT_CONFIG_URL = "https://blinkit.com/config/main"
-BLINKIT_FLAG_URL = "https://blinkit.com/api/feature-flags/receive"
+# BLINKIT_CONFIG_URL = "https://blinkit.com/config/main"
+# BLINKIT_FLAG_URL = "https://blinkit.com/api/feature-flags/receive"
 BLINKIT_MAP_URL = "https://blinkit.com/mapAPI/autosuggest_google"
-BLINKIT_PAGE_URL = "https://blinkit.com/prn/x/prid"
 BLINKIT_LAYOUT_URL = "https://blinkit.com/v1/layout/product"
 BLINKIT_PRN_URL = "https://blinkit.com/prn/x/prid"
 
 
-class BlinkitSessionScraper:
-    def __init__(self):
-        self.page = SessionPage()
-        self.sess = self.page.session
-
-    def fetch_config(self) -> dict:
-        logger.note(f"> Fetching Blinkit config:")
-        logger.file(f"  * {BLINKIT_CONFIG_URL}")
-        request_headers = {}
-        self.page.get(BLINKIT_CONFIG_URL, headers=request_headers)
-        resp_json = self.page.response.json()
-        logger.mesg(resp_json)
-        return resp_json
-
-    def fetch_feature_flags(self) -> dict:
-        logger.note(f"> Fetching feature flags:")
-        logger.file(f"  * {BLINKIT_FLAG_URL}")
-        request_headers = {}
-        self.page.get(BLINKIT_FLAG_URL, headers=request_headers)
-        resp_json = self.page.response.json()
-        logger.mesg(resp_json)
-        return resp_json
-
-    def fetch_map_data(self, query: str) -> dict:
-        quoted_query = urllib.parse.quote(query)
-        logger.note(f"> Fetching map data:")
-        logger.file(f"  * {quoted_query}")
-        request_params = {
-            "query": query,
-        }
-        request_headers = {}
-        self.page.get(BLINKIT_MAP_URL, params=request_params, headers=request_headers)
-        resp_json = self.page.response.json()
-        logger.mesg(resp_json)
-        return resp_json
-
-    def fetch_layout_data(self, product_id: Union[str, int]) -> dict:
-        layout_url = f"{BLINKIT_LAYOUT_URL}/{product_id}"
-        logger.note(f"> Fetching product layout: {logstr.mesg(brk(product_id))}")
-        logger.file(f"  * {layout_url}")
-        self.page.post(layout_url)
-        resp_json = self.page.response.json()
-        logger.mesg(resp_json)
-        return resp_json
-
-
 class BlinkitBrowserScraper:
-    """ponty/PyVirtualDisplay: Python wrapper for Xvfb, Xephyr and Xvnc
-    * https://github.com/ponty/PyVirtualDisplay
-
-    Install dependencies:
-
+    """Install dependencies:
     ```sh
     sudo apt-get install xvfb xserver-xephyr tigervnc-standalone-server x11-utils gnumeric
     pip install pyvirtualdisplay pillow EasyProcess
     ```
+
+    See: ponty/PyVirtualDisplay: Python wrapper for Xvfb, Xephyr and Xvnc
+    * https://github.com/ponty/PyVirtualDisplay
     """
 
-    def __init__(self):
+    def __init__(self, use_virtual_display: bool = True):
+        self.use_virtual_display = use_virtual_display
         self.init_virtual_display()
         self.init_browser()
 
     def init_virtual_display(self):
-        self.display = Display()
-        self.start_virtual_display()
+        self.is_using_virtual_display = False
+        if self.use_virtual_display:
+            self.display = Display()
+            self.start_virtual_display()
 
     def init_browser(self):
         chrome_options = ChromiumOptions()
@@ -177,7 +127,7 @@ def test_session_scraper():
 
 
 def test_browser_scraper():
-    scraper = BlinkitBrowserScraper()
+    scraper = BlinkitBrowserScraper(use_virtual_display=False)
     # Fetch product data
     # product_id = "380156"
     product_id = "14639"
