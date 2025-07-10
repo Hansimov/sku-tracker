@@ -1,3 +1,6 @@
-data/
-log/
 __pycache__/
+data/
+imgs/
+logs/
+
+secrets.json
