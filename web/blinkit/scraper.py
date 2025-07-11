@@ -230,9 +230,14 @@ class BlinkitBrowserScraper:
 
 
 class BlinkitProductDataExtractor:
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+
     def extract(self, resp: dict) -> dict:
+        logger.enter_quiet(not self.verbose)
         if not resp:
             logger.warn("  × Empty response data to extract")
+            logger.exit_quiet(not self.verbose)
             return {}
 
         logger.note(f"  > Extracting product Data ...")
@@ -255,6 +260,7 @@ class BlinkitProductDataExtractor:
         # get product_name, price, mrp, unit
         meta_data = dict_get(resp, ["response", "tracking", "le_meta"], {})
         seo_data = dict_get(meta_data, ["custom_data", "seo"], {})
+        product_id = dict_get(meta_data, "id", None)
         product_name = dict_get(seo_data, ["product_name"], None)
         price = dict_get(seo_data, ["price"], None)
         mrp = dict_get(seo_data, ["mrp"], None)
@@ -266,12 +272,15 @@ class BlinkitProductDataExtractor:
 
         product_data = {
             "product_name": product_name,
+            "product_id": product_id,
             "in_stock": in_stock,
             "price": price,
             "mrp": mrp,
             "unit": unit,
         }
         logger.okay(dict_to_str(product_data), indent=4)
+        logger.exit_quiet(not self.verbose)
+
         return product_data
 
 

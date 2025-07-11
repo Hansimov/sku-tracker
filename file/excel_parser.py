@@ -7,15 +7,18 @@ from configs.envs import SKU_XLSX
 
 
 class ExcelReader:
-    def __init__(self, file_path: Path = SKU_XLSX):
+    def __init__(self, file_path: Path = SKU_XLSX, verbose: bool = True):
         self.file_path = file_path
+        self.verbose = verbose
         self.init_df()
 
     def init_df(self):
+        logger.enter_quiet(not self.verbose)
         logger.note("> Reading Excel to DataFrame ...")
         self.df = pd.read_excel(self.file_path, header=0, engine="openpyxl")
         self.columns = self.df.columns.tolist()
         logger.file(f"  * {self.file_path}")
+        logger.exit_quiet(not self.verbose)
 
     def get_column_by_name(self, column: str) -> pd.Series:
         _, column_idx, _ = match_val(column, self.columns, use_fuzz=True)
