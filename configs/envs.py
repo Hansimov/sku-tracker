@@ -10,3 +10,4 @@ DATA_ROOT = REPO_ROOT / "data"
 SECRETS_PATH = CONFIGS_ROOT / "secrets.json"
 SECRETS = OSEnver(SECRETS_PATH)
 LOCATIONS = SECRETS["locations"]
+SKU_XLSX = DATA_ROOT / SECRETS["sku_xlsx"]
