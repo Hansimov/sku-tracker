@@ -251,11 +251,11 @@ class BlinkitProductDataExtractor:
                 break
         product_state = dict_get(atc_strip_data, ["product_state"], "").lower()
         if product_state == "available":
-            in_stock = True
+            in_stock = "Y"
         elif product_state == "out_of_stock":
-            in_stock = False
+            in_stock = "N"
         else:
-            in_stock = None
+            in_stock = "-"
 
         # get product_name, price, mrp, unit
         meta_data = dict_get(resp, ["response", "tracking", "le_meta"], {})
