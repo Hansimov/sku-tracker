@@ -1,11 +1,13 @@
+import json
+
 from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pyvirtualdisplay import Display
-from tclogger import logger, logstr, brk, dict_to_str, dict_get
+from tclogger import logger, logstr, brk, dict_to_str, dict_get, get_now_str, tcdatetime
 from time import sleep
 from typing import Union
 
-from configs.envs import LOCATIONS
+from configs.envs import DATA_ROOT, LOCATIONS
 from web.clicker import LocationClicker
 
 # BLINKIT_CONFIG_URL = "https://blinkit.com/config/main"
@@ -31,6 +33,7 @@ class BlinkitBrowserScraper:
         self.init_virtual_display()
         self.init_browser()
         self.init_location_clicker()
+        self.init_paths()
 
     def init_virtual_display(self):
         self.is_using_virtual_display = False
@@ -45,6 +48,10 @@ class BlinkitBrowserScraper:
 
     def init_location_clicker(self):
         self.location_clicker = LocationClicker()
+
+    def init_paths(self):
+        date_str = get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / date_str / "blinkit"
 
     def start_virtual_display(self):
         self.display.start()
@@ -76,8 +83,20 @@ class BlinkitBrowserScraper:
         self.location_clicker.run()
         sleep(2)
 
-    def fetch_product_info(
-        self, product_id: Union[str, int], location_idx: int = None
+    def get_cookies(self, tab: ChromiumTab) -> dict:
+        cookies_dict = tab.cookies(all_info=True).as_dict()
+        cookies_dict["url"] = tab.url
+        cookies_dict["now"] = get_now_str()
+        return cookies_dict
+
+    def new_tab(self) -> ChromiumTab:
+        return self.browser.new_tab()
+
+    def fetch(
+        self,
+        product_id: Union[str, int],
+        location_idx: int = None,
+        save_cookies: bool = True,
     ) -> dict:
         prn_url = f"{BLINKIT_PRN_URL}/{product_id}"
         logger.note(f"> Visiting product page: {logstr.mesg(brk(product_id))}")
@@ -119,8 +138,36 @@ class BlinkitBrowserScraper:
             if layout_resp:
                 layout_data = layout_resp.body
 
+        if save_cookies:
+            layout_data["cookies"] = self.get_cookies(tab)
+
         self.stop_virtual_display()
         return layout_data
+
+    def dump(self, product_id: Union[str, int], resp: dict, parent: str = None):
+        logger.note(f"  > Dumping product data to json ...")
+        filename = f"{product_id}.json"
+        if parent:
+            dump_path = self.dump_root / parent / filename
+        else:
+            dump_path = self.dump_root / filename
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(dump_path, "w", encoding="utf-8") as wf:
+            json.dump(resp, wf, indent=4, ensure_ascii=False)
+        logger.okay(f"    * {dump_path}")
+
+    def run(
+        self,
+        product_id: Union[str, int],
+        location_idx: int = 0,
+        save_cookies: bool = True,
+        parent: str = None,
+    ) -> dict:
+        product_info = self.fetch(
+            product_id=product_id, location_idx=location_idx, save_cookies=save_cookies
+        )
+        self.dump(product_id=product_id, resp=product_info, parent=parent)
+        return product_info
 
 
 class BlinkitProductDataExtractor:
@@ -170,7 +217,8 @@ def test_browser_scraper():
     # product_id = "380156"
     # product_id = "14639"
     product_id = "514893"
-    product_info = scraper.fetch_product_info(product_id, location_idx=1)
+    product_info = scraper.fetch(product_id, location_idx=0, save_cookies=True)
+    scraper.dump(product_id, product_info)
 
     extractor = BlinkitProductDataExtractor()
     extractor.extract(product_info)
