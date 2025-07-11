@@ -28,7 +28,7 @@ class BlinkitBatcher:
                     continue
                 else:
                     logger.note(
-                        f" > [{logstr.mesg(link_idx+1)}/{logstr.file(links_count)}]",
+                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(links_count)}]",
                         end=" ",
                     )
                 product_id = link.split("/")[-1]
@@ -44,7 +44,8 @@ class BlinkitBatcher:
                     parent=location_name,
                 )
                 extracted_data = self.extractor.extract(product_info)
-                sleep(0.5)
+                if extracted_data:
+                    sleep(1)
 
 
 if __name__ == "__main__":
