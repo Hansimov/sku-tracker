@@ -122,7 +122,9 @@ class BlinkitBrowserScraper:
         self.stop_virtual_display()
         return layout_data
 
-    def extract_product_data(self, resp: dict) -> dict:
+
+class BlinkitProductDataExtractor:
+    def extract(self, resp: dict) -> dict:
         logger.note(f"  > Extracting product Data ...")
 
         # get in_stock
@@ -165,16 +167,16 @@ class BlinkitBrowserScraper:
 
 def test_browser_scraper():
     scraper = BlinkitBrowserScraper(use_virtual_display=False)
-    # Fetch product data
     # product_id = "380156"
     # product_id = "14639"
     product_id = "514893"
     product_info = scraper.fetch_product_info(product_id, location_idx=1)
-    scraper.extract_product_data(product_info)
+
+    extractor = BlinkitProductDataExtractor()
+    extractor.extract(product_info)
 
 
 if __name__ == "__main__":
-    # test_session_scraper()
     test_browser_scraper()
 
-    # python -m web.blinkit_scraper
+    # python -m web.blinkit.scraper
