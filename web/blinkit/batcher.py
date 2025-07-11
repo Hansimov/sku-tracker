@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 
+from copy import deepcopy
 from tclogger import logger, logstr, brk, Runtimer, TCLogbar, TCLogbarGroup
 from tclogger import dict_to_str, dict_get, get_now_str
 from time import sleep
@@ -9,9 +10,17 @@ from pathlib import Path
 from typing import Union
 from urllib.parse import unquote
 
-from configs.envs import DATA_ROOT, LOCATIONS
-from file.excel_parser import ExcelReader
+from configs.envs import DATA_ROOT, LOCATIONS, SKU_XLSX
+from file.excel_parser import ExcelReader, DataframeParser
 from web.blinkit.scraper import BlinkitBrowserScraper, BlinkitProductDataExtractor
+
+BLINKIT_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
+BLINKIT_KEY_COLUMN_MAP = {
+    "unit": "unit size_blinkit",
+    "price": "price_blinkit",
+    "mrp": "mrp_blinkit",
+    "in_stock": "instock_blinkit",
+}
 
 
 class BlinkitScrapeBatcher:
@@ -66,6 +75,8 @@ class BlinkitExtractBatcher:
     def init_paths(self):
         date_str = get_now_str()[:10]
         self.dump_root = DATA_ROOT / "dumps" / date_str / "blinkit"
+        self.output_root = DATA_ROOT / "output" / date_str / "blinkit"
+        self.date_str = date_str
 
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
         filename = f"{product_id}.json"
@@ -74,6 +85,13 @@ class BlinkitExtractBatcher:
         else:
             dump_path = self.dump_root / filename
         return dump_path
+
+    def get_output_path(self, name: str = None) -> Path:
+        if name:
+            output_path = self.output_root / f"{self.date_str}_blinkit_{name}.xlsx"
+        else:
+            output_path = self.output_root / "output.xlsx"
+        return output_path
 
     def load_product_info(self, product_id: str, location_name: str = None) -> dict:
         logger.enter_quiet(not self.verbose)
@@ -114,13 +132,17 @@ class BlinkitExtractBatcher:
         product_bar = TCLogbar(total=len(blinkit_links), head=" * Product:")
         TCLogbarGroup([location_bar, product_bar])
         for location_idx, location_item in enumerate(LOCATIONS):
+            df = deepcopy(self.excel_reader.df)
+            df_parser = DataframeParser(df, verbose=self.verbose)
             location_name = location_item.get("name", "")
             links = blinkit_links[:]
             location_bar.update(desc=logstr.mesg(brk(location_name)), flush=True)
+            row_dicts: list[dict] = []
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(f"> Skip empty link at row [{link_idx}]")
+                    logger.mesg(f"* Skip empty link at row [{link_idx}]")
+                    row_dicts.append({})
                     continue
                 product_id = link.split("/")[-1]
                 product_bar.set_desc(logstr.mesg(brk(product_id)))
@@ -129,6 +151,17 @@ class BlinkitExtractBatcher:
                 )
                 self.check_location(product_info, location_idx)
                 extracted_data = self.extractor.extract(product_info)
+                row_dicts.append(extracted_data)
+            output_path = self.get_output_path(location_name)
+            renamed_row_dicts = df_parser.rename_row_dicts_keys_to_column(
+                row_dicts=row_dicts,
+                key_column_map=BLINKIT_KEY_COLUMN_MAP,
+                include_keys=BLINKIT_INCLUDE_KEYS,
+            )
+            df_parser.update_df_by_row_dicts(renamed_row_dicts)
+            df_parser.dump_to_excel(
+                output_path=output_path, sheet_name=output_path.stem
+            )
             location_bar.update(increment=1, flush=True)
         print()
 
