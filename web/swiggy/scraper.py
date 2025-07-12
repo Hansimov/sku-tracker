@@ -8,17 +8,73 @@ from tclogger import logger, logstr, brk, get_now_str, dict_to_str, dict_get, di
 from time import sleep
 from typing import Union
 
-from configs.envs import DATA_ROOT
+from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
+from web.clicker import SwiggyLocationClicker
 
+SWIGGY_MAIN_URL = "https://www.swiggy.com"
 SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
 
 
 class SwiggyLocationSwitcher:
-    pass
+    def __init__(self, use_virtual_display: bool = False):
+        self.use_virtual_display = use_virtual_display
+        self.init_virtual_display()
+        self.init_browser()
+        self.init_location_clicker()
+
+    def init_virtual_display(self):
+        self.is_using_virtual_display = False
+        if self.use_virtual_display:
+            self.display = Display()
+            self.start_virtual_display()
+
+    def init_browser(self):
+        chrome_options = ChromiumOptions()
+        self.browser = Chromium(addr_or_opts=chrome_options)
+        self.chrome_options = chrome_options
+
+    def init_location_clicker(self):
+        self.location_clicker = SwiggyLocationClicker()
+
+    def start_virtual_display(self):
+        self.display.start()
+        self.is_using_virtual_display = True
+
+    def stop_virtual_display(self):
+        if self.is_using_virtual_display:
+            self.display.stop()
+            self.is_using_virtual_display = False
+
+    def set_location(self, location_idx: int = 0) -> dict:
+        logger.note(f"> Visiting main page: {logstr.mesg(brk(SWIGGY_MAIN_URL))}")
+        tab = self.browser.latest_tab
+        tab.set.load_mode.none()
+
+        tab.get(SWIGGY_MAIN_URL)
+        logger.okay(f"  ✓ Title: {brk(tab.title)}")
+
+        logger.note(f"> Setting location:")
+        location_dict = SWIGGY_LOCATIONS[location_idx]
+        location_name = location_dict.get("name", "")
+        location_text = location_dict.get("text", "")
+        location_shot = location_dict.get("shot", "")
+        logger.file(f"  * {location_name} ({location_text})")
+
+        sleep(3)
+        self.location_clicker.set_location_image_name("swiggy_loc_main.png")
+        self.location_clicker.type_target_location_text(location_text)
+
+        sleep(3)
+        self.location_clicker.set_location_image_name(location_shot)
+        self.location_clicker.click_target_location()
+
+        sleep(3)
+
+        self.stop_virtual_display()
 
 
 class SwiggyBrowserScraper:
-    def __init__(self, use_virtual_display: bool = True):
+    def __init__(self, use_virtual_display: bool = False):
         self.use_virtual_display = use_virtual_display
         self.init_virtual_display()
         self.init_browser()
@@ -194,7 +250,11 @@ class SwiggyProductDataExtractor:
 
 
 def test_browser_scraper():
+    switcher = SwiggyLocationSwitcher(use_virtual_display=False)
+    switcher.set_location(location_idx=2)
+
     scraper = SwiggyBrowserScraper(use_virtual_display=False)
+    scraper.new_tab()
     # product_id = "MW5MP8UE57"
     # product_id = "YR2XETQJK3"
     product_id = "A05X4XH0BU"
