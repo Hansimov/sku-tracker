@@ -1,9 +1,12 @@
 import pandas as pd
+import warnings
 
 from pathlib import Path
 from tclogger import logger, match_val
 
 from configs.envs import SKU_XLSX
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 class ExcelReader:

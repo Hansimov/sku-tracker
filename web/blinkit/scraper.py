@@ -4,12 +4,12 @@ from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from pyvirtualdisplay import Display
-from tclogger import logger, logstr, brk, dict_to_str, dict_get, get_now_str, tcdatetime
+from tclogger import logger, logstr, brk, dict_to_str, dict_get, get_now_str
 from time import sleep
 from typing import Union
 from urllib.parse import unquote
 
-from configs.envs import DATA_ROOT, LOCATIONS
+from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from web.clicker import LocationClicker
 
 # BLINKIT_CONFIG_URL = "https://blinkit.com/config/main"
@@ -68,7 +68,7 @@ class BlinkitBrowserScraper:
         cookies_dict = tab.cookies(all_info=True).as_dict()
         cookie_locality = cookies_dict.get("gr_1_locality", "")
         cookie_landmark = cookies_dict.get("gr_1_landmark", "")
-        location_dict = LOCATIONS[location_idx]
+        location_dict = BLINKIT_LOCATIONS[location_idx]
         correct_locality = location_dict.get("locality", "")
         info_dict = {
             "cookie_locality": cookie_locality,
@@ -83,7 +83,7 @@ class BlinkitBrowserScraper:
         return True
 
     def set_location(self, tab: ChromiumTab, location_idx: int = 0):
-        location_dict = LOCATIONS[location_idx]
+        location_dict = BLINKIT_LOCATIONS[location_idx]
         location_text = location_dict.get("text", "")
         location_shot = location_dict.get("shot", "")
         logger.note(f"  > Setting location:")

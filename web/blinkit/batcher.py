@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Union
 from urllib.parse import unquote
 
-from configs.envs import DATA_ROOT, LOCATIONS, SKU_XLSX
+from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.blinkit.scraper import BlinkitBrowserScraper, BlinkitProductDataExtractor
 
@@ -31,7 +31,7 @@ class BlinkitScrapeBatcher:
 
     def run(self):
         blinkit_links = self.excel_reader.get_column_by_name("weblink_blinkit")
-        for location_idx, location_item in enumerate(LOCATIONS):
+        for location_idx, location_item in enumerate(BLINKIT_LOCATIONS):
             self.scraper.new_tab()
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
@@ -110,7 +110,7 @@ class BlinkitExtractBatcher:
         return product_info
 
     def check_location(self, product_info: dict, location_idx: int):
-        location_dict = LOCATIONS[location_idx]
+        location_dict = BLINKIT_LOCATIONS[location_idx]
         dump_locality = dict_get(product_info, ["cookies", "gr_1_locality"], "")
         dump_landmark = dict_get(product_info, ["cookies", "gr_1_landmark"], "")
         correct_locality = location_dict.get("locality", "")
@@ -128,10 +128,10 @@ class BlinkitExtractBatcher:
 
     def run(self):
         blinkit_links = self.excel_reader.get_column_by_name("weblink_blinkit")
-        location_bar = TCLogbar(total=len(LOCATIONS), head="Location:")
+        location_bar = TCLogbar(total=len(BLINKIT_LOCATIONS), head="Location:")
         product_bar = TCLogbar(total=len(blinkit_links), head=" * Product:")
         TCLogbarGroup([location_bar, product_bar])
-        for location_idx, location_item in enumerate(LOCATIONS):
+        for location_idx, location_item in enumerate(BLINKIT_LOCATIONS):
             df = deepcopy(self.excel_reader.df)
             df_parser = DataframeParser(df, verbose=self.verbose)
             location_name = location_item.get("name", "")
