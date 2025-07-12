@@ -66,7 +66,7 @@ class SwiggyLocationSwitcher:
 
         sleep(3)
         self.location_clicker.set_location_image_name(location_shot)
-        self.location_clicker.click_target_location()
+        self.location_clicker.click_target_position()
 
         sleep(3)
 

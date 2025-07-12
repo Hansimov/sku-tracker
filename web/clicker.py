@@ -90,14 +90,10 @@ class LocationClicker:
         return region_center
 
     def click_target_position(self):
+        self.get_screenshot()
         location_item_center = self.get_location_item_position()
         pyautogui.moveTo(*location_item_center)
         pyautogui.click()
-
-    def run(self):
-        self.get_screenshot()
-        self.get_location_item_position()
-        self.click_target_position()
 
 
 class SwiggyLocationClicker(LocationClicker):
@@ -109,15 +105,8 @@ class SwiggyLocationClicker(LocationClicker):
         pyautogui.press("backspace")
         pyautogui.typewrite(location_text)
 
-    def click_target_location(self):
-        self.get_screenshot()
-        location_item_center = self.get_location_item_position()
-        pyautogui.moveTo(*location_item_center)
-        pyautogui.click()
-
 
 if __name__ == "__main__":
     clicker = LocationClicker()
-    clicker.run()
 
     # python -m web.clicker

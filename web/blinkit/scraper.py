@@ -100,7 +100,7 @@ class BlinkitBrowserScraper:
         logger.okay(f"    * {selected_address_label}")
         self.location_clicker.set_location_image_name(location_shot)
         sleep(2)
-        self.location_clicker.run()
+        self.location_clicker.click_target_position()
         sleep(2)
         self.check_location(tab, location_idx=location_idx)
 
