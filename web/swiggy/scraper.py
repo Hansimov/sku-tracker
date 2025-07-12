@@ -51,7 +51,7 @@ class SwiggyLocationSwitcher:
         tab.set.load_mode.none()
 
         tab.get(SWIGGY_MAIN_URL)
-        logger.okay(f"  ✓ Title: {brk(tab.title)}")
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
         logger.note(f"> Setting location:")
         location_dict = SWIGGY_LOCATIONS[location_idx]
@@ -129,7 +129,7 @@ class SwiggyBrowserScraper:
         tab.set.load_mode.none()
 
         tab.get(item_url, interval=4)
-        logger.okay(f"  ✓ Title: {brk(tab.title)}")
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
         product_info = tab.run_js("return window.___INITIAL_STATE___;")
         if product_info and save_cookies:
@@ -153,13 +153,17 @@ class SwiggyBrowserScraper:
                 if res:
                     break
             except Exception as e:
-                retry_count += 1
-                if retry_count < max_retries:
-                    logger.note(f"  > Retry ({retry_count}/{max_retries})")
-                    sleep(2)
-                else:
-                    logger.warn(f"  × Exceed max retries ({max_retries}), aborted")
-                    raise e
+                logger.warn(f"  × Fetch failed: {e}")
+
+            retry_count += 1
+            if retry_count < max_retries:
+                logger.note(f"  > Retry ({retry_count}/{max_retries})")
+                sleep(3)
+            else:
+                err_mesg = f"  × Exceed max retries ({max_retries}), aborted"
+                logger.warn(err_mesg)
+                raise RuntimeError(err_mesg)
+
         return res
 
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
@@ -179,17 +183,8 @@ class SwiggyBrowserScraper:
         logger.okay(f"    * {dump_path}")
 
     def run(
-        self,
-        product_id: Union[str, int],
-        save_cookies: bool = True,
-        parent: str = None,
-        skip_exists: bool = True,
+        self, product_id: Union[str, int], save_cookies: bool = True, parent: str = None
     ) -> dict:
-        dump_path = self.get_dump_path(product_id=product_id, parent=parent)
-        if skip_exists and dump_path.exists():
-            logger.note(f"  > Skip exists:")
-            logger.file(f"    * {dump_path}")
-            return True
         product_info = self.fetch_with_retry(
             product_id=product_id, save_cookies=save_cookies
         )

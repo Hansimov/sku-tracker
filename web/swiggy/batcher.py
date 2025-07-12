@@ -45,35 +45,38 @@ class SwiggyScrapeBatcher:
             raise ValueError(err_mesg)
         return True
 
-    def run(self):
+    def run(self, skip_exists: bool = True):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
         for location_idx, location_item in enumerate(SWIGGY_LOCATIONS):
-            self.scraper.new_tab()
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
-            logger.hint(f"> New Location: {location_name} ({location_text})")
             links = swiggy_links[:]
-            links_count = len(links)
-            self.switcher.set_location(location_idx)
+            is_set_location = False
             for link_idx, link in enumerate(links):
                 if not link:
                     logger.mesg(f"> Skip empty link at row [{link_idx}]")
                     continue
                 else:
                     logger.note(
-                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(links_count)}]",
+                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(len(links))}]",
                         end=" ",
                     )
                 product_id = link.split("/")[-1].strip()
-                product_info = self.scraper.run(
-                    product_id, save_cookies=True, parent=location_name
-                )
-                if product_info is True:
+                dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
+                if skip_exists and dump_path.exists():
+                    logger.note(f"  > Skip exists:")
+                    logger.file(f"    * {dump_path}")
                     continue
+                if not is_set_location:
+                    logger.hint(f"> New Location: {location_name} ({location_text})")
+                    self.scraper.new_tab()
+                    self.switcher.set_location(location_idx)
+                    is_set_location = True
+                product_info = self.scraper.run(product_id, parent=location_name)
                 self.check_location(product_info, location_idx)
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(1.5)
+                    sleep(3)
 
 
 class SwiggyExtractBatcher:
@@ -150,7 +153,7 @@ class SwiggyExtractBatcher:
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(f"* Skip empty link at row [{link_idx}]")
+                    logger.mesg(f"  * Skip empty link at row [{link_idx}]")
                     row_dicts.append({})
                     continue
                 product_id = link.split("/")[-1].strip()
