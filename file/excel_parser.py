@@ -18,7 +18,9 @@ class ExcelReader:
     def init_df(self):
         logger.enter_quiet(not self.verbose)
         logger.note("> Reading DataFrame from Excel:")
-        self.df = pd.read_excel(self.file_path, header=0, engine="openpyxl")
+        self.df = pd.read_excel(
+            self.file_path, header=0, engine="openpyxl", keep_default_na=False
+        )
         self.columns = self.df.columns.tolist()
         logger.file(f"  * {self.file_path}")
         logger.exit_quiet(not self.verbose)

@@ -128,7 +128,7 @@ class SwiggyBrowserScraper:
         tab = self.browser.latest_tab
         tab.set.load_mode.none()
 
-        tab.get(item_url)
+        tab.get(item_url, interval=4)
         logger.okay(f"  ✓ Title: {brk(tab.title)}")
 
         product_info = tab.run_js("return window.___INITIAL_STATE___;")
@@ -189,7 +189,7 @@ class SwiggyBrowserScraper:
         if skip_exists and dump_path.exists():
             logger.note(f"  > Skip exists:")
             logger.file(f"    * {dump_path}")
-            return {}
+            return True
         product_info = self.fetch_with_retry(
             product_id=product_id, save_cookies=save_cookies
         )
@@ -256,8 +256,8 @@ def test_browser_scraper():
     scraper = SwiggyBrowserScraper(use_virtual_display=False)
     scraper.new_tab()
     # product_id = "MW5MP8UE57"
-    # product_id = "YR2XETQJK3"
-    product_id = "A05X4XH0BU"
+    # product_id = "A05X4XH0BU"
+    product_id = "YR2XETQJK3"
     product_info = scraper.fetch(product_id, save_cookies=True)
     scraper.dump(product_id, product_info)
 
