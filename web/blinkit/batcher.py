@@ -201,3 +201,6 @@ if __name__ == "__main__":
 
     # Case 2: Batch extract
     # python -m web.blinkit.batcher -e
+
+    # Case 3: Batch scrape and extract
+    # python -m web.blinkit.batcher -s -e

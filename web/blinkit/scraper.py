@@ -4,7 +4,7 @@ from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from pyvirtualdisplay import Display
-from tclogger import logger, logstr, brk, dict_to_str, dict_get, get_now_str
+from tclogger import logger, logstr, brk, dict_to_str, dict_get, dict_set, get_now_str
 from time import sleep
 from typing import Union
 from urllib.parse import unquote
@@ -113,6 +113,31 @@ class BlinkitBrowserScraper:
     def new_tab(self) -> ChromiumTab:
         return self.browser.new_tab()
 
+    def clean_resp(self, resp: dict) -> dict:
+        dict_set(resp, ["response", "page_actions"], [])
+        dict_set(resp, ["response", "page_level_components"], {})
+        dict_set(resp, ["response", "snippet_list_updater_data"], {})
+
+        clean_snippets = []
+        snippets_keys = ["response", "snippets"]
+        snippets = dict_get(resp, snippets_keys, [])
+        for snippet in snippets:
+            if snippet.get("widget_type") in ["product_atc_strip"]:
+                clean_snippets.append(snippet)
+        dict_set(resp, snippets_keys, clean_snippets)
+
+        clean_attributes = []
+        atttributes_keys = [
+            *["response", "tracking", "le_meta"],
+            *["custom_data", "seo", "attributes"],
+        ]
+        attributes = dict_get(resp, atttributes_keys, [])
+        for attr in attributes:
+            if attr.get("name", "").lower() in ["unit"]:
+                clean_attributes.append(attr)
+        dict_set(resp, atttributes_keys, clean_attributes)
+        return resp
+
     def fetch(
         self,
         product_id: Union[str, int],
@@ -158,6 +183,7 @@ class BlinkitBrowserScraper:
             layout_resp = layout_packet.response
             if layout_resp:
                 layout_data = layout_resp.body
+                layout_data = self.clean_resp(layout_data)
 
         if save_cookies:
             layout_data["cookies"] = self.get_cookies(tab)
@@ -243,9 +269,9 @@ class BlinkitProductDataExtractor:
         logger.note(f"  > Extracting product Data ...")
 
         # get in_stock
-        snippes = dict_get(resp, ["response", "snippets"], [])
+        snippets = dict_get(resp, ["response", "snippets"], [])
         atc_strip_data = {}
-        for snippet in snippes:
+        for snippet in snippets:
             if snippet.get("widget_type") == "product_atc_strip":
                 atc_strip_data = snippet.get("data", {})
                 break
@@ -292,7 +318,7 @@ def test_browser_scraper():
     product_info = scraper.fetch(product_id, location_idx=0, save_cookies=True)
     scraper.dump(product_id, product_info)
 
-    extractor = BlinkitProductDataExtractor()
+    extractor = BlinkitProductDataExtractor(verbose=True)
     extractor.extract(product_info)
 
 
