@@ -11,4 +11,6 @@ SECRETS_PATH = CONFIGS_ROOT / "secrets.json"
 SECRETS = OSEnver(SECRETS_PATH)
 BLINKIT_LOCATIONS = SECRETS["blinkit_locations"]
 SWIGGY_LOCATIONS = SECRETS["swiggy_locations"]
+ZEPTO_LOCATIONS = SECRETS["zepto_locations"]
 SKU_XLSX = DATA_ROOT / SECRETS["sku_xlsx"]
+HTTP_PROXY = SECRETS["http_proxy"]
