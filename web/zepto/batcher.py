@@ -49,8 +49,14 @@ class ZeptoLocationChecker:
 class ZeptoScrapeBatcher:
     def __init__(self):
         self.excel_reader = ExcelReader()
-        self.scraper = ZeptoBrowserScraper(use_virtual_display=False)
+        # NOTE: switcher MUST be placed before scraper
+        # as switcher initializes browser with proxy, while scraper not use proxy;
+        # in drissionpage, browser is singleton,
+        # once the browser is initialized, its proxy could not be set afterwards;
+        # so if switcher is placed after scraper,
+        # switcher would not work, as scraper is already initiating a browser without proxy
         self.switcher = ZeptoLocationSwitcher(use_virtual_display=False)
+        self.scraper = ZeptoBrowserScraper(use_virtual_display=False)
         self.extractor = ZeptoProductDataExtractor()
         self.checker = ZeptoLocationChecker()
 
@@ -78,7 +84,6 @@ class ZeptoScrapeBatcher:
                     continue
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
-                    self.scraper.new_tab()
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 product_info = self.scraper.run(product_id, parent=location_name)

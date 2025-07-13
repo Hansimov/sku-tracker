@@ -88,6 +88,8 @@ class ZeptoLocationSwitcher:
         confirm_button.click()
 
         sleep(3)
+        self.browser.new_tab()
+
         self.stop_virtual_display()
 
 
