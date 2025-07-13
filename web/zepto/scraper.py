@@ -16,6 +16,12 @@ ZEPTO_ITEM_URL = "https://www.zeptonow.com/pn/x/pvid"
 ZEPTO_PAGE_URL = "https://cdn.bff.zeptonow.com/api/v2/get_page"
 
 
+def deserialize_str_to_json(json_str: str) -> dict:
+    """Deserialize JSON-style string to Python dictionary."""
+    json_str = bytes(json_str, "utf-8").decode("unicode_escape")
+    return json.loads(json_str)
+
+
 class ZeptoLocationSwitcher:
     def __init__(self, use_virtual_display: bool = False):
         self.use_virtual_display = use_virtual_display
@@ -48,7 +54,7 @@ class ZeptoLocationSwitcher:
         tab = self.browser.latest_tab
         tab.set.load_mode.none()
 
-        tab.get(ZEPTO_MAIN_URL)
+        tab.get(ZEPTO_MAIN_URL, timeout=30)
         logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
         logger.note(f"> Setting location:")
@@ -60,6 +66,7 @@ class ZeptoLocationSwitcher:
         sleep(3)
         location_button = tab.ele("xpath=//button[@aria-label='Select Location']")
         location_button.click()
+
         sleep(1)
         location_input = tab.ele(
             "xpath=//div[@data-testid='address-search-input']//input"
@@ -75,12 +82,12 @@ class ZeptoLocationSwitcher:
 
         sleep(2)
         confirm_button = tab.ele(
-            "xpath=//div[@class='map-view-with-search-map-container']//button[@data-testid='location-confirm-btn']"
+            "xpath=//div[@class='map-view-with-search-map-container']//button[@data-testid='location-confirm-btn']",
+            timeout=30,
         )
         confirm_button.click()
 
         sleep(3)
-
         self.stop_virtual_display()
 
 
@@ -90,8 +97,7 @@ class ZeptoResponseParser:
         matches = re.findall(pattern, html, flags=re.DOTALL)
         results = []
         for match in matches:
-            match_str = bytes(match, "utf-8").decode("unicode_escape")
-            data = json.loads(match_str)
+            data = deserialize_str_to_json(match)
             results.append(data)
         if len(results) == 1:
             return results[0]
@@ -221,6 +227,11 @@ class ZeptoBrowserScraper:
         cookies_dict["now"] = get_now_str()
         return cookies_dict
 
+    def get_local_storage(self, tab: ChromiumTab) -> dict:
+        local_storage = tab.local_storage(item="user-position")
+        local_storage_dict = deserialize_str_to_json(local_storage)
+        return local_storage_dict
+
     def new_tab(self) -> ChromiumTab:
         return self.browser.new_tab()
 
@@ -241,6 +252,8 @@ class ZeptoBrowserScraper:
             resp = self.resp_parser.clean_resp(resp)
             product_info = {"resp": resp}
             product_info["cookies"] = self.get_cookies(tab)
+            product_info["local_storage"] = self.get_local_storage(tab)
+            product_info["product_id"] = product_id
 
         self.stop_virtual_display()
         return product_info
@@ -330,8 +343,14 @@ class ZeptoProductDataExtractor:
 
         # get price, mrp, unit
         price = dict_get(product, "discountedSellingPrice", None)
+        if price is not None:
+            price = price // 100
         mrp = dict_get(product, "mrp", None)
-        super_price = dict_get(product, "superSaverSellingPrice", None)
+        if mrp is not None:
+            mrp = mrp // 100
+        price_supersaver = dict_get(product, "superSaverSellingPrice", None)
+        if price_supersaver is not None:
+            price_supersaver = price_supersaver // 100
         unit = dict_get(prd_info, "productVariant.formattedPacksize", None)
 
         product_data = {
@@ -339,8 +358,8 @@ class ZeptoProductDataExtractor:
             "product_id": product_id,
             "unit": unit,
             "price": price,
+            "price_supersaver": price_supersaver,
             "mrp": mrp,
-            "super_price": super_price,
             "in_stock": in_stock_flag,
         }
         logger.okay(dict_to_str(product_data), indent=4)
@@ -351,11 +370,12 @@ class ZeptoProductDataExtractor:
 
 def test_browser_scraper():
     switcher = ZeptoLocationSwitcher(use_virtual_display=False)
-    switcher.set_location(location_idx=2)
+    switcher.set_location(location_idx=0)
 
     scraper = ZeptoBrowserScraper(use_virtual_display=False)
     # product_id = "14a11cfe-fd72-4901-bf2e-22bc0aba21c0"
-    product_id = "7851f4a9-cab6-4b75-bae2-bcbc43bf0bdb"
+    # product_id = "7851f4a9-cab6-4b75-bae2-bcbc43bf0bdb"
+    product_id = "18e5789f-aab8-4281-8db4-380bb50a1c29"
     product_info = scraper.fetch(product_id, save_cookies=True)
     scraper.dump(product_id, product_info)
 
