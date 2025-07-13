@@ -1,4 +1,5 @@
 import json
+import urllib.parse
 
 from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
@@ -13,6 +14,66 @@ from web.clicker import SwiggyLocationClicker
 
 SWIGGY_MAIN_URL = "https://www.swiggy.com"
 SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
+
+
+class SwiggyLocationChecker:
+    def get_correct_address(self, location_idx: int) -> str:
+        return SWIGGY_LOCATIONS[location_idx].get("text", "")
+
+    def unify_address(self, address: str) -> str:
+        if address:
+            return "".join(address.replace(",", "").split()[:2]).lower()
+        else:
+            return ""
+
+    def check_address(
+        self,
+        local_address: str,
+        correct_address: str,
+        extra_msg: str = "",
+        raise_error: bool = True,
+    ):
+        if not local_address:
+            return False
+        local_address_str = self.unify_address(local_address)
+        correct_address_str = self.unify_address(correct_address)
+        if local_address_str != correct_address_str:
+            err_mesg = f"  × {extra_msg}: incorrect location!"
+            logger.warn(err_mesg)
+            info_dict = {
+                "local_address": local_address,
+                "correct_address": correct_address,
+            }
+            logger.mesg(dict_to_str(info_dict), indent=4)
+            if raise_error:
+                raise ValueError(err_mesg)
+            return False
+        return True
+
+    def check_tab_location(
+        self, tab: ChromiumTab, location_idx: int, extra_msg: str = ""
+    ):
+        cookies = tab.cookies(all_info=True).as_dict()
+        user_location_raw = dict_get(cookies, "userLocation", None)
+        if not user_location_raw:
+            return False
+        try:
+            user_location_dict = json.loads(urllib.parse.unquote(user_location_raw))
+            tab_address = dict_get(user_location_dict, "address", "")
+            correct_address = self.get_correct_address(location_idx)
+            return self.check_address(
+                tab_address, correct_address, extra_msg, raise_error=False
+            )
+        except Exception as e:
+            logger.warn(e)
+            return False
+
+    def check_product_location(
+        self, product_info: dict, location_idx: int, extra_msg: str = ""
+    ):
+        product_address = dict_get(product_info, ["userLocation", "address"], "")
+        correct_address = self.get_correct_address(location_idx)
+        return self.check_address(product_address, correct_address, extra_msg)
 
 
 class SwiggyLocationSwitcher:

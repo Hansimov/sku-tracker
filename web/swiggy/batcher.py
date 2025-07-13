@@ -11,8 +11,8 @@ from typing import Union
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
-from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyLocationSwitcher
-from web.swiggy.scraper import SwiggyProductDataExtractor
+from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
+from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 
 SWIGGY_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
 SWIGGY_KEY_COLUMN_MAP = {
@@ -21,23 +21,6 @@ SWIGGY_KEY_COLUMN_MAP = {
     "mrp": "mrp_instamart",
     "in_stock": "instock_instamart",
 }
-
-
-class SwiggyLocationChecker:
-    def check(self, product_info: dict, location_idx: int, extra_msg: str = ""):
-        location_dict = SWIGGY_LOCATIONS[location_idx]
-        dump_address = dict_get(product_info, ["userLocation", "address"], "")
-        correct_address = location_dict.get("text", "")
-        if dump_address.split()[0].lower() != correct_address.split()[0].lower():
-            err_mesg = f"  × {extra_msg}: incorrect location!"
-            logger.warn(err_mesg)
-            info_dict = {
-                "dump_address": dump_address,
-                "correct_address": correct_address,
-            }
-            logger.mesg(dict_to_str(info_dict), indent=4)
-            raise ValueError(err_mesg)
-        return True
 
 
 class SwiggyScrapeBatcher:
@@ -76,7 +59,7 @@ class SwiggyScrapeBatcher:
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 product_info = self.scraper.run(product_id, parent=location_name)
-                self.checker.check(
+                self.checker.check_product_location(
                     product_info, location_idx, extra_msg="SwiggyScrapeBatcher"
                 )
                 extracted_data = self.extractor.extract(product_info)
@@ -153,7 +136,7 @@ class SwiggyExtractBatcher:
                     product_id=product_id, location_name=location_name
                 )
                 try:
-                    self.checker.check(
+                    self.checker.check_product_location(
                         product_info, location_idx, extra_msg="SwiggyExtractBatcher"
                     )
                 except Exception as e:
