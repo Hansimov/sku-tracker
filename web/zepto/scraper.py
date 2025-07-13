@@ -36,7 +36,7 @@ class ZeptoLocationSwitcher:
 
     def init_browser(self):
         chrome_options = ChromiumOptions()
-        chrome_options.set_argument(f"--proxy-server={HTTP_PROXY}")
+        chrome_options.set_proxy(HTTP_PROXY)
         self.browser = Chromium(addr_or_opts=chrome_options)
         self.chrome_options = chrome_options
 
