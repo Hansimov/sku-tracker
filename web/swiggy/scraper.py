@@ -78,6 +78,7 @@ class SwiggyLocationChecker:
 
 class SwiggyLocationSwitcher:
     def __init__(self, use_virtual_display: bool = False):
+        self.checker = SwiggyLocationChecker()
         self.use_virtual_display = use_virtual_display
         self.init_virtual_display()
         self.init_browser()
@@ -114,23 +115,28 @@ class SwiggyLocationSwitcher:
         tab.get(SWIGGY_MAIN_URL)
         logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
-        logger.note(f"> Setting location:")
-        location_dict = SWIGGY_LOCATIONS[location_idx]
-        location_name = location_dict.get("name", "")
-        location_text = location_dict.get("text", "")
-        location_shot = location_dict.get("shot", "")
-        logger.file(f"  * {location_name} ({location_text})")
+        if self.checker.check_tab_location(
+            tab, location_idx, extra_msg="SwiggyLocationSwitcher"
+        ):
+            logger.okay("  * Location already correctly set. Skip.")
+        else:
+            logger.note(f"> Setting location:")
+            location_dict = SWIGGY_LOCATIONS[location_idx]
+            location_name = location_dict.get("name", "")
+            location_text = location_dict.get("text", "")
+            location_shot = location_dict.get("shot", "")
+            logger.file(f"  * {location_name} ({location_text})")
 
-        sleep(3)
-        self.location_clicker.set_location_image_name("swiggy_loc_main.png")
-        self.location_clicker.type_target_location_text(location_text)
+            sleep(3)
+            self.location_clicker.set_location_image_name("swiggy_loc_main.png")
+            self.location_clicker.type_target_location_text(location_text)
 
-        sleep(3)
-        self.location_clicker.set_location_image_name(location_shot)
-        self.location_clicker.click_target_position()
+            sleep(3)
+            self.location_clicker.set_location_image_name(location_shot)
+            self.location_clicker.click_target_position()
 
-        sleep(3)
-        self.browser.new_tab()
+            sleep(3)
+            self.browser.new_tab()
 
         self.stop_virtual_display()
 
