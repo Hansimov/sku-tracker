@@ -69,6 +69,7 @@ class SwiggyLocationSwitcher:
         self.location_clicker.click_target_position()
 
         sleep(3)
+        self.browser.new_tab()
 
         self.stop_virtual_display()
 

@@ -23,19 +23,13 @@ SWIGGY_KEY_COLUMN_MAP = {
 }
 
 
-class SwiggyScrapeBatcher:
-    def __init__(self):
-        self.excel_reader = ExcelReader()
-        self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
-        self.switcher = SwiggyLocationSwitcher(use_virtual_display=False)
-        self.extractor = SwiggyProductDataExtractor()
-
-    def check_location(self, product_info: dict, location_idx: int):
+class SwiggyLocationChecker:
+    def check(self, product_info: dict, location_idx: int, extra_msg: str = ""):
         location_dict = SWIGGY_LOCATIONS[location_idx]
         dump_address = dict_get(product_info, ["userLocation", "address"], "")
         correct_address = location_dict.get("text", "")
         if dump_address.split()[0].lower() != correct_address.split()[0].lower():
-            err_mesg = f"  × Location dumpped incorrectly!"
+            err_mesg = f"  × {extra_msg}: incorrect location!"
             logger.warn(err_mesg)
             info_dict = {
                 "dump_address": dump_address,
@@ -44,6 +38,15 @@ class SwiggyScrapeBatcher:
             logger.mesg(dict_to_str(info_dict), indent=4)
             raise ValueError(err_mesg)
         return True
+
+
+class SwiggyScrapeBatcher:
+    def __init__(self):
+        self.excel_reader = ExcelReader()
+        self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
+        self.switcher = SwiggyLocationSwitcher(use_virtual_display=False)
+        self.extractor = SwiggyProductDataExtractor()
+        self.checker = SwiggyLocationChecker()
 
     def run(self, skip_exists: bool = True):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
@@ -73,7 +76,9 @@ class SwiggyScrapeBatcher:
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 product_info = self.scraper.run(product_id, parent=location_name)
-                self.check_location(product_info, location_idx)
+                self.checker.check(
+                    product_info, location_idx, extra_msg="SwiggyScrapeBatcher"
+                )
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
                     sleep(3)
@@ -83,6 +88,7 @@ class SwiggyExtractBatcher:
     def __init__(self, verbose: bool = False):
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = SwiggyProductDataExtractor()
+        self.checker = SwiggyLocationChecker()
         self.verbose = verbose
         self.init_paths()
 
@@ -123,21 +129,6 @@ class SwiggyExtractBatcher:
         logger.exit_quiet(not self.verbose)
         return product_info
 
-    def check_location(self, product_info: dict, location_idx: int):
-        location_dict = SWIGGY_LOCATIONS[location_idx]
-        dump_address = dict_get(product_info, ["userLocation", "address"], "")
-        correct_address = location_dict.get("text", "")
-        if dump_address.split()[0].lower() != correct_address.split()[0].lower():
-            err_mesg = f"  × Location dumpped incorrectly!"
-            logger.warn(err_mesg)
-            info_dict = {
-                "dump_address": dump_address,
-                "correct_address": correct_address,
-            }
-            logger.mesg(dict_to_str(info_dict), indent=4)
-            raise ValueError(err_mesg)
-        return True
-
     def run(self):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
         location_bar = TCLogbar(total=len(SWIGGY_LOCATIONS), head="Location:")
@@ -161,7 +152,13 @@ class SwiggyExtractBatcher:
                 product_info = self.load_product_info(
                     product_id=product_id, location_name=location_name
                 )
-                self.check_location(product_info, location_idx)
+                try:
+                    self.checker.check(
+                        product_info, location_idx, extra_msg="SwiggyExtractBatcher"
+                    )
+                except Exception as e:
+                    logger.warn(f"    * {product_id}")
+                    raise e
                 extracted_data = self.extractor.extract(product_info)
                 row_dicts.append(extracted_data)
             output_path = self.get_output_path(location_name)
