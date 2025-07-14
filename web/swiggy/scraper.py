@@ -78,11 +78,8 @@ class SwiggyLocationChecker:
 
 class SwiggyLocationSwitcher:
     def __init__(self, use_virtual_display: bool = False):
-        self.checker = SwiggyLocationChecker()
         self.use_virtual_display = use_virtual_display
-        self.init_virtual_display()
-        self.init_browser()
-        self.init_location_clicker()
+        self.checker = SwiggyLocationChecker()
 
     def init_virtual_display(self):
         self.is_using_virtual_display = False
@@ -109,6 +106,9 @@ class SwiggyLocationSwitcher:
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(SWIGGY_MAIN_URL))}")
+        self.init_virtual_display()
+        self.init_browser()
+        self.init_location_clicker()
         tab = self.browser.latest_tab
         tab.set.load_mode.none()
 
@@ -135,17 +135,16 @@ class SwiggyLocationSwitcher:
             self.location_clicker.set_location_image_name(location_shot)
             self.location_clicker.click_target_position()
 
-            sleep(3)
-            self.browser.quit()
+            sleep(5)
 
+        self.browser.new_tab()
         self.stop_virtual_display()
 
 
 class SwiggyBrowserScraper:
     def __init__(self, use_virtual_display: bool = False):
         self.use_virtual_display = use_virtual_display
-        self.init_virtual_display()
-        self.init_browser()
+        self.is_browser_inited = False
         self.init_paths()
 
     def init_virtual_display(self):
@@ -178,9 +177,6 @@ class SwiggyBrowserScraper:
         cookies_dict["now"] = get_now_str()
         return cookies_dict
 
-    def new_tab(self) -> ChromiumTab:
-        return self.browser.new_tab()
-
     def clean_resp(self, resp: dict) -> dict:
         dict_set(resp, "storeDetailsV2", {})
         dict_set(resp, "misc", {})
@@ -192,6 +188,11 @@ class SwiggyBrowserScraper:
         item_url = f"{SWIGGY_ITEM_URL}/{product_id}"
         logger.note(f"> Visiting product page: {logstr.mesg(brk(product_id))}")
         logger.file(f"  * {item_url}")
+
+        if not self.is_browser_inited:
+            self.init_virtual_display()
+            self.init_browser()
+            self.is_browser_inited = True
 
         tab = self.browser.latest_tab
         tab.set.load_mode.none()
@@ -317,10 +318,10 @@ def test_browser_scraper():
     switcher.set_location(location_idx=1)
 
     sleep(2)
-    switcher.browser.quit()
+    switcher.browser.new_tab()
 
     scraper = SwiggyBrowserScraper(use_virtual_display=False)
-    scraper.new_tab()
+    scraper.browser.new_tab()
     # product_id = "MW5MP8UE57"
     # product_id = "A05X4XH0BU"
     product_id = "YR2XETQJK3"
