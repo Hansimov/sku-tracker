@@ -136,7 +136,7 @@ class SwiggyLocationSwitcher:
             self.location_clicker.click_target_position()
 
             sleep(3)
-            self.browser.new_tab()
+            self.browser.quit()
 
         self.stop_virtual_display()
 
@@ -314,7 +314,10 @@ class SwiggyProductDataExtractor:
 
 def test_browser_scraper():
     switcher = SwiggyLocationSwitcher(use_virtual_display=False)
-    switcher.set_location(location_idx=2)
+    switcher.set_location(location_idx=1)
+
+    sleep(2)
+    switcher.browser.quit()
 
     scraper = SwiggyBrowserScraper(use_virtual_display=False)
     scraper.new_tab()

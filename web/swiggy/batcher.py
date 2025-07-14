@@ -2,9 +2,10 @@ import argparse
 import json
 import sys
 
+from acto import Retrier
 from copy import deepcopy
 from tclogger import logger, logstr, brk, Runtimer, TCLogbar, TCLogbarGroup
-from tclogger import dict_to_str, dict_get, get_now_str
+from tclogger import get_now_str
 from time import sleep
 from pathlib import Path
 from typing import Union
@@ -26,10 +27,20 @@ SWIGGY_KEY_COLUMN_MAP = {
 class SwiggyScrapeBatcher:
     def __init__(self):
         self.excel_reader = ExcelReader()
-        self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
         self.switcher = SwiggyLocationSwitcher(use_virtual_display=False)
+        self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
         self.extractor = SwiggyProductDataExtractor()
         self.checker = SwiggyLocationChecker()
+
+    def quit_browsers(self):
+        try:
+            self.switcher.browser.quit()
+        except Exception as e:
+            pass
+        try:
+            self.scraper.browser.quit()
+        except Exception as e:
+            pass
 
     def run(self, skip_exists: bool = True):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
@@ -55,7 +66,6 @@ class SwiggyScrapeBatcher:
                     continue
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
-                    self.scraper.new_tab()
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 product_info = self.scraper.run(product_id, parent=location_name)
@@ -172,7 +182,13 @@ class SwiggyBatcherArgParser(argparse.ArgumentParser):
 def main(args: argparse.Namespace):
     if args.scrape:
         scraper_batcher = SwiggyScrapeBatcher()
-        scraper_batcher.run()
+        try:
+            scraper_batcher.run()
+        except Exception as e:
+            logger.warn(e)
+            logger.warn(f"> Quiting browsers ...")
+            sleep(5)
+            scraper_batcher.quit_browsers()
 
     if args.extract:
         extract_batcher = SwiggyExtractBatcher()
@@ -185,11 +201,17 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     arg_parser = SwiggyBatcherArgParser()
     args = arg_parser.parse_args()
-    with Runtimer():
-        main(args)
+    timer = Runtimer()
+    retrier = Retrier(max_retries=5, retry_interval=60)
+    with timer:
+        with retrier:
+            retrier.run(main, args)
 
     # Case 1: Batch scrape
     # python -m web.swiggy.batcher -s
 
     # Case 2: Batch extract
     # python -m web.swiggy.batcher -e
+
+    # Case 3: Batch scrape and extract
+    # python -m web.swiggy.batcher -s -e
