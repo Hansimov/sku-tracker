@@ -1,9 +1,7 @@
 import json
 
-from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from pyvirtualdisplay import Display
 from tclogger import logger, logstr, brk, dict_to_str, dict_get, dict_set, get_now_str
 from time import sleep
 from typing import Union
@@ -11,12 +9,113 @@ from urllib.parse import unquote
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from web.clicker import LocationClicker
+from web.browser import BrowserClient
 
-# BLINKIT_CONFIG_URL = "https://blinkit.com/config/main"
+BLINKIT_MAIN_URL = "https://blinkit.com"
 BLINKIT_FLAG_URL = "https://blinkit.com/api/feature-flags/receive"
 BLINKIT_MAP_URL = "https://blinkit.com/mapAPI/autosuggest_google"
 BLINKIT_LAYOUT_URL = "https://blinkit.com/v1/layout/product"
 BLINKIT_PRN_URL = "https://blinkit.com/prn/x/prid"
+
+
+class BlinkitLocationChecker:
+    def get_correct_address(self, location_idx: int) -> str:
+        return BLINKIT_LOCATIONS[location_idx].get("locality", "")
+
+    def unify_address(self, address: str) -> str:
+        if address:
+            return unquote(address).lower()
+        else:
+            return ""
+
+    def check_address(
+        self,
+        local_address: str,
+        correct_address: str,
+        extra_msg: str = "",
+        raise_error: bool = True,
+    ):
+        if not local_address:
+            return False
+        local_address_str = self.unify_address(local_address)
+        correct_address_str = self.unify_address(correct_address)
+        if local_address_str != correct_address_str:
+            err_mesg = f"  × {extra_msg}: incorrect location!"
+            logger.warn(err_mesg)
+            info_dict = {
+                "local_address": local_address,
+                "correct_address": correct_address,
+            }
+            logger.mesg(dict_to_str(info_dict), indent=4)
+            if raise_error:
+                raise ValueError(err_mesg)
+            return False
+        return True
+
+    def check_tab_location(
+        self, tab: ChromiumTab, location_idx: int, extra_msg: str = ""
+    ) -> bool:
+        cookies_dict = tab.cookies(all_info=True).as_dict()
+        local_address = cookies_dict.get("gr_1_locality", "")
+        correct_address = self.get_correct_address(location_idx)
+        return self.check_address(
+            local_address, correct_address, extra_msg, raise_error=False
+        )
+
+    def check_product_location(
+        self, product_info: dict, location_idx: int, extra_msg: str = ""
+    ):
+        product_address = dict_get(product_info, "cookies.gr_1_locality", "")
+        correct_address = self.get_correct_address(location_idx)
+        return self.check_address(product_address, correct_address, extra_msg)
+
+
+class BlinkitLocationSwitcher:
+    def __init__(self):
+        self.checker = BlinkitLocationChecker()
+        self.client = BrowserClient()
+
+    def create_clicker(self):
+        self.clicker = LocationClicker()
+
+    def set_location(self, location_idx: int = 0) -> dict:
+        self.client.start_client()
+        self.create_clicker()
+        tab = self.client.browser.latest_tab
+        tab.set.load_mode.none()
+
+        tab.get(BLINKIT_MAIN_URL)
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
+
+        if self.checker.check_tab_location(
+            tab, location_idx, extra_msg="BlinkitLocationSwitcher"
+        ):
+            logger.okay("  * Location already correctly set. Skip.")
+        else:
+            logger.note(f"  > Setting location:")
+            location_dict = BLINKIT_LOCATIONS[location_idx]
+            location_text = location_dict.get("text", "")
+            location_shot = location_dict.get("shot", "")
+            logger.file(f"    * {location_text}")
+            location_bar = tab.ele(".^LocationBar__SubtitleContainer")
+            sleep(2)
+            location_bar.click()
+            sleep(2)
+            location_input = tab.ele('xpath://input[@name="select-locality"]')
+            location_input.input(location_text)
+            sleep(2)
+            selected_address = tab.ele(".^LocationSearchList__LocationDetailContainer")
+            selected_address_label = selected_address.ele(
+                ".^LocationSearchList__LocationLabel"
+            ).text
+            logger.note(f"  > Selected address: {logstr.okay(selected_address_label)}")
+            self.clicker.set_location_image_name(location_shot)
+            sleep(2)
+            self.clicker.click_target_position()
+            sleep(5)
+
+        self.client.close_other_tabs(create_new_tab=True)
+        self.client.stop_client(close_browser=False)
 
 
 class BlinkitBrowserScraper:
@@ -30,88 +129,23 @@ class BlinkitBrowserScraper:
     * https://github.com/ponty/PyVirtualDisplay
     """
 
-    def __init__(self, use_virtual_display: bool = True):
-        self.use_virtual_display = use_virtual_display
-        self.init_virtual_display()
-        self.init_browser()
-        self.init_location_clicker()
+    def __init__(self):
+        self.client = BrowserClient()
+        self.checker = BlinkitLocationChecker()
         self.init_paths()
 
-    def init_virtual_display(self):
-        self.is_using_virtual_display = False
-        if self.use_virtual_display:
-            self.display = Display()
-            self.start_virtual_display()
-
-    def init_browser(self):
-        chrome_options = ChromiumOptions()
-        self.browser = Chromium(addr_or_opts=chrome_options)
-        self.chrome_options = chrome_options
-
-    def init_location_clicker(self):
-        self.location_clicker = LocationClicker()
+    def create_clicker(self):
+        self.clicker = LocationClicker()
 
     def init_paths(self):
         date_str = get_now_str()[:10]
         self.dump_root = DATA_ROOT / "dumps" / date_str / "blinkit"
-
-    def start_virtual_display(self):
-        self.display.start()
-        self.is_using_virtual_display = True
-
-    def stop_virtual_display(self):
-        if self.is_using_virtual_display:
-            self.display.stop()
-            self.is_using_virtual_display = False
-
-    def check_location(self, tab: ChromiumTab, location_idx: int) -> bool:
-        cookies_dict = tab.cookies(all_info=True).as_dict()
-        cookie_locality = cookies_dict.get("gr_1_locality", "")
-        cookie_landmark = cookies_dict.get("gr_1_landmark", "")
-        location_dict = BLINKIT_LOCATIONS[location_idx]
-        correct_locality = location_dict.get("locality", "")
-        info_dict = {
-            "cookie_locality": cookie_locality,
-            "cookie_landmark": cookie_landmark,
-            "correct_locality": correct_locality,
-        }
-        logger.mesg(dict_to_str(info_dict), indent=4)
-        if unquote(cookie_locality.lower()) != unquote(correct_locality.lower()):
-            err_mesg = f"  × Location set incorrectly!"
-            logger.warn(err_mesg)
-            raise ValueError(err_mesg)
-        return True
-
-    def set_location(self, tab: ChromiumTab, location_idx: int = 0):
-        location_dict = BLINKIT_LOCATIONS[location_idx]
-        location_text = location_dict.get("text", "")
-        location_shot = location_dict.get("shot", "")
-        logger.note(f"  > Setting location:")
-        logger.file(f"    * {location_text}")
-        location_bar = tab.ele(".^LocationBar__SubtitleContainer")
-        location_bar.click()
-        location_input = tab.ele('xpath://input[@name="select-locality"]')
-        location_input.input(location_text)
-        selected_address = tab.ele(".^LocationSearchList__LocationDetailContainer")
-        selected_address_label = selected_address.ele(
-            ".^LocationSearchList__LocationLabel"
-        ).text
-        logger.note(f"  > Selected address:")
-        logger.okay(f"    * {selected_address_label}")
-        self.location_clicker.set_location_image_name(location_shot)
-        sleep(2)
-        self.location_clicker.click_target_position()
-        sleep(2)
-        self.check_location(tab, location_idx=location_idx)
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()
         cookies_dict["url"] = tab.url
         cookies_dict["now"] = get_now_str()
         return cookies_dict
-
-    def new_tab(self) -> ChromiumTab:
-        return self.browser.new_tab()
 
     def clean_resp(self, resp: dict) -> dict:
         dict_set(resp, ["response", "page_actions"], [])
@@ -138,17 +172,13 @@ class BlinkitBrowserScraper:
         dict_set(resp, atttributes_keys, clean_attributes)
         return resp
 
-    def fetch(
-        self,
-        product_id: Union[str, int],
-        location_idx: int = None,
-        save_cookies: bool = True,
-    ) -> dict:
+    def fetch(self, product_id: Union[str, int], save_cookies: bool = True) -> dict:
         prn_url = f"{BLINKIT_PRN_URL}/{product_id}"
         logger.note(f"> Visiting product page: {logstr.mesg(brk(product_id))}")
         logger.file(f"  * {prn_url}")
 
-        tab = self.browser.latest_tab
+        self.client.start_client()
+        tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
         layout_url = f"{BLINKIT_LAYOUT_URL}/{product_id}"
@@ -169,8 +199,6 @@ class BlinkitBrowserScraper:
             packet_url_str = logstr.file(brk(packet_url))
             if packet_url == BLINKIT_FLAG_URL:
                 logger.okay(f"  + Flags packet captured: {packet_url_str}")
-                if location_idx is not None:
-                    self.set_location(tab, location_idx)
             elif packet_url == layout_url:
                 logger.okay(f"  + Layout packet captured: {packet_url_str}")
                 layout_packet = packet
@@ -185,16 +213,15 @@ class BlinkitBrowserScraper:
                 layout_data = layout_resp.body
                 layout_data = self.clean_resp(layout_data)
 
-        if save_cookies:
+        if layout_data and save_cookies:
             layout_data["cookies"] = self.get_cookies(tab)
 
-        self.stop_virtual_display()
+        self.client.stop_client(close_browser=False)
         return layout_data
 
     def fetch_with_retry(
         self,
         product_id: Union[str, int],
-        location_idx: int = None,
         save_cookies: bool = True,
         max_retries: int = 3,
     ):
@@ -202,11 +229,7 @@ class BlinkitBrowserScraper:
         res = None
         while retry_count < max_retries:
             try:
-                res = self.fetch(
-                    product_id=product_id,
-                    location_idx=location_idx,
-                    save_cookies=save_cookies,
-                )
+                res = self.fetch(product_id=product_id, save_cookies=save_cookies)
                 if res:
                     break
             except Exception as e:
@@ -236,20 +259,10 @@ class BlinkitBrowserScraper:
         logger.okay(f"    * {dump_path}")
 
     def run(
-        self,
-        product_id: Union[str, int],
-        location_idx: int = 0,
-        save_cookies: bool = True,
-        parent: str = None,
-        skip_exists: bool = True,
+        self, product_id: Union[str, int], save_cookies: bool = True, parent: str = None
     ) -> dict:
-        dump_path = self.get_dump_path(product_id=product_id, parent=parent)
-        if skip_exists and dump_path.exists():
-            logger.note(f"  > Skip exists:")
-            logger.file(f"    * {dump_path}")
-            return {}
         product_info = self.fetch_with_retry(
-            product_id=product_id, location_idx=location_idx, save_cookies=save_cookies
+            product_id=product_id, save_cookies=save_cookies
         )
         self.dump(product_id=product_id, resp=product_info, parent=parent)
         return product_info
@@ -311,11 +324,15 @@ class BlinkitProductDataExtractor:
 
 
 def test_browser_scraper():
-    scraper = BlinkitBrowserScraper(use_virtual_display=False)
+    switcher = BlinkitLocationSwitcher()
+    switcher.set_location(location_idx=0)
+    sleep(2)
+
+    scraper = BlinkitBrowserScraper()
     # product_id = "380156"
     # product_id = "14639"
     product_id = "514893"
-    product_info = scraper.fetch(product_id, location_idx=0, save_cookies=True)
+    product_info = scraper.fetch(product_id, save_cookies=True)
     scraper.dump(product_id, product_info)
 
     extractor = BlinkitProductDataExtractor(verbose=True)
