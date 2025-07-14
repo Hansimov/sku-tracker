@@ -5,8 +5,9 @@ from tclogger import logger
 
 
 class BrowserClient:
-    def __init__(self, use_virtual_display: bool = False):
+    def __init__(self, use_virtual_display: bool = False, proxy: str = None):
         self.use_virtual_display = use_virtual_display
+        self.proxy = proxy
         self.is_using_virtual_display = False
         self.is_browser_opened = False
 
@@ -25,6 +26,8 @@ class BrowserClient:
         if self.is_browser_opened:
             return
         chrome_options = ChromiumOptions()
+        if self.proxy:
+            chrome_options.set_proxy(self.proxy)
         self.browser = Chromium(addr_or_opts=chrome_options)
         self.chrome_options = chrome_options
         self.is_browser_opened = True

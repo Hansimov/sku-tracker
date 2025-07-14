@@ -123,7 +123,6 @@ class SwiggyLocationSwitcher:
 
 class SwiggyBrowserScraper:
     def __init__(self):
-        self.is_client_started = False
         self.client = BrowserClient()
         self.init_paths()
 
@@ -271,14 +270,12 @@ class SwiggyProductDataExtractor:
 
 
 def test_browser_scraper():
-    switcher = SwiggyLocationSwitcher(use_virtual_display=False)
+    switcher = SwiggyLocationSwitcher()
     switcher.set_location(location_idx=1)
 
     sleep(2)
-    switcher.browser.new_tab()
 
-    scraper = SwiggyBrowserScraper(use_virtual_display=False)
-    scraper.browser.new_tab()
+    scraper = SwiggyBrowserScraper()
     # product_id = "MW5MP8UE57"
     # product_id = "A05X4XH0BU"
     product_id = "YR2XETQJK3"
