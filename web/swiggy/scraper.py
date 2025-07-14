@@ -11,6 +11,7 @@ from typing import Union
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from web.clicker import SwiggyLocationClicker
+from web.browser import BrowserClient
 
 SWIGGY_MAIN_URL = "https://www.swiggy.com"
 SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
@@ -77,39 +78,18 @@ class SwiggyLocationChecker:
 
 
 class SwiggyLocationSwitcher:
-    def __init__(self, use_virtual_display: bool = False):
-        self.use_virtual_display = use_virtual_display
+    def __init__(self):
         self.checker = SwiggyLocationChecker()
+        self.client = BrowserClient()
 
-    def init_virtual_display(self):
-        self.is_using_virtual_display = False
-        if self.use_virtual_display:
-            self.display = Display()
-            self.start_virtual_display()
-
-    def init_browser(self):
-        chrome_options = ChromiumOptions()
-        self.browser = Chromium(addr_or_opts=chrome_options)
-        self.chrome_options = chrome_options
-
-    def init_location_clicker(self):
-        self.location_clicker = SwiggyLocationClicker()
-
-    def start_virtual_display(self):
-        self.display.start()
-        self.is_using_virtual_display = True
-
-    def stop_virtual_display(self):
-        if self.is_using_virtual_display:
-            self.display.stop()
-            self.is_using_virtual_display = False
+    def create_clicker(self):
+        self.clicker = SwiggyLocationClicker()
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(SWIGGY_MAIN_URL))}")
-        self.init_virtual_display()
-        self.init_browser()
-        self.init_location_clicker()
-        tab = self.browser.latest_tab
+        self.client.start_client()
+        self.create_clicker()
+        tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
         tab.get(SWIGGY_MAIN_URL)
@@ -128,48 +108,28 @@ class SwiggyLocationSwitcher:
             logger.file(f"  * {location_name} ({location_text})")
 
             sleep(3)
-            self.location_clicker.set_location_image_name("swiggy_loc_main.png")
-            self.location_clicker.type_target_location_text(location_text)
+            self.clicker.set_location_image_name("swiggy_loc_main.png")
+            self.clicker.type_target_location_text(location_text)
 
             sleep(3)
-            self.location_clicker.set_location_image_name(location_shot)
-            self.location_clicker.click_target_position()
+            self.clicker.set_location_image_name(location_shot)
+            self.clicker.click_target_position()
 
             sleep(5)
 
-        self.browser.new_tab()
-        self.stop_virtual_display()
+        self.client.close_other_tabs(create_new_tab=True)
+        self.client.stop_client(close_browser=False)
 
 
 class SwiggyBrowserScraper:
-    def __init__(self, use_virtual_display: bool = False):
-        self.use_virtual_display = use_virtual_display
-        self.is_browser_inited = False
+    def __init__(self):
+        self.is_client_started = False
+        self.client = BrowserClient()
         self.init_paths()
-
-    def init_virtual_display(self):
-        self.is_using_virtual_display = False
-        if self.use_virtual_display:
-            self.display = Display()
-            self.start_virtual_display()
-
-    def init_browser(self):
-        chrome_options = ChromiumOptions()
-        self.browser = Chromium(addr_or_opts=chrome_options)
-        self.chrome_options = chrome_options
 
     def init_paths(self):
         date_str = get_now_str()[:10]
         self.dump_root = DATA_ROOT / "dumps" / date_str / "swiggy"
-
-    def start_virtual_display(self):
-        self.display.start()
-        self.is_using_virtual_display = True
-
-    def stop_virtual_display(self):
-        if self.is_using_virtual_display:
-            self.display.stop()
-            self.is_using_virtual_display = False
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()
@@ -189,12 +149,9 @@ class SwiggyBrowserScraper:
         logger.note(f"> Visiting product page: {logstr.mesg(brk(product_id))}")
         logger.file(f"  * {item_url}")
 
-        if not self.is_browser_inited:
-            self.init_virtual_display()
-            self.init_browser()
-            self.is_browser_inited = True
+        self.client.start_client()
 
-        tab = self.browser.latest_tab
+        tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
         tab.get(item_url, interval=4)
@@ -205,7 +162,7 @@ class SwiggyBrowserScraper:
             product_info = self.clean_resp(product_info)
             product_info["cookies"] = self.get_cookies(tab)
 
-        self.stop_virtual_display()
+        self.client.stop_client(close_browser=False)
         return product_info
 
     def fetch_with_retry(
