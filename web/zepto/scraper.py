@@ -1,15 +1,14 @@
 import json
 import re
 
-from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from pyvirtualdisplay import Display
 from tclogger import logger, logstr, brk, get_now_str, dict_to_str, dict_get, dict_set
 from time import sleep
 from typing import Union
 
 from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS, HTTP_PROXY
+from web.browser import BrowserClient
 
 ZEPTO_MAIN_URL = "https://www.zeptonow.com"
 ZEPTO_ITEM_URL = "https://www.zeptonow.com/pn/x/pvid"
@@ -22,75 +21,114 @@ def deserialize_str_to_json(json_str: str) -> dict:
     return json.loads(json_str)
 
 
+class ZeptoLocationChecker:
+    def get_correct_address(self, location_idx: int) -> str:
+        return ZEPTO_LOCATIONS[location_idx].get("locality", "")
+
+    def check_address(
+        self,
+        local_address: str,
+        correct_address: str,
+        extra_msg: str = "",
+        raise_error: bool = True,
+    ):
+        if not local_address:
+            return False
+        if correct_address.lower() not in local_address.lower():
+            err_mesg = f"  × {extra_msg}: incorrect location!"
+            logger.warn(err_mesg)
+            info_dict = {
+                "local_address": local_address,
+                "correct_address": correct_address,
+            }
+            logger.mesg(dict_to_str(info_dict), indent=4)
+            if raise_error:
+                raise ValueError(err_mesg)
+            return False
+        return True
+
+    def check_tab_location(
+        self, tab: ChromiumTab, location_idx: int, extra_msg: str = ""
+    ):
+        local_storage_str = tab.local_storage(item="user-position")
+        if not local_storage_str:
+            return False
+        try:
+            local_storage_dict = deserialize_str_to_json(local_storage_str)
+            tab_address = dict_get(
+                local_storage_dict, "state.userPosition.shortAddress", ""
+            )
+            correct_address = self.get_correct_address(location_idx)
+            return self.check_address(
+                tab_address, correct_address, extra_msg, raise_error=False
+            )
+        except Exception as e:
+            logger.warn(e)
+            return False
+
+    def check_product_location(
+        self, product_info: dict, location_idx: int, extra_msg: str = ""
+    ):
+        product_address = dict_get(
+            product_info, "local_storage.state.userPosition.shortAddress", ""
+        )
+        correct_address = self.get_correct_address(location_idx)
+        return self.check_address(product_address, correct_address, extra_msg)
+
+
 class ZeptoLocationSwitcher:
-    def __init__(self, use_virtual_display: bool = False):
-        self.use_virtual_display = use_virtual_display
-        self.init_virtual_display()
-        self.init_browser()
-
-    def init_virtual_display(self):
-        self.is_using_virtual_display = False
-        if self.use_virtual_display:
-            self.display = Display()
-            self.start_virtual_display()
-
-    def init_browser(self):
-        chrome_options = ChromiumOptions()
-        chrome_options.set_proxy(HTTP_PROXY)
-        self.browser = Chromium(addr_or_opts=chrome_options)
-        self.chrome_options = chrome_options
-
-    def start_virtual_display(self):
-        self.display.start()
-        self.is_using_virtual_display = True
-
-    def stop_virtual_display(self):
-        if self.is_using_virtual_display:
-            self.display.stop()
-            self.is_using_virtual_display = False
+    def __init__(self):
+        self.checker = ZeptoLocationChecker()
+        self.client = BrowserClient(proxy=HTTP_PROXY)
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(ZEPTO_MAIN_URL))}")
-        tab = self.browser.latest_tab
+        self.client.start_client()
+        tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
         tab.get(ZEPTO_MAIN_URL, timeout=30)
         logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
-        logger.note(f"> Setting location:")
-        location_dict = ZEPTO_LOCATIONS[location_idx]
-        location_name = location_dict.get("name", "")
-        location_text = location_dict.get("text", "")
-        logger.file(f"  * {location_name} ({location_text})")
+        if self.checker.check_tab_location(
+            tab, location_idx, extra_msg="ZeptoLocationSwitcher"
+        ):
+            logger.okay("  * Location already correctly set. Skip.")
+        else:
+            logger.note(f"> Setting location:")
+            location_dict = ZEPTO_LOCATIONS[location_idx]
+            location_name = location_dict.get("name", "")
+            location_text = location_dict.get("text", "")
+            logger.file(f"  * {location_name} ({location_text})")
 
-        sleep(3)
-        location_button = tab.ele("xpath=//button[@aria-label='Select Location']")
-        location_button.click()
+            sleep(3)
+            location_button = tab.ele("xpath=//button[@aria-label='Select Location']")
+            location_button.click()
 
-        sleep(1)
-        location_input = tab.ele(
-            "xpath=//div[@data-testid='address-search-input']//input"
-        )
-        sleep(1)
-        location_input.input(location_text)
+            sleep(1)
+            location_input = tab.ele(
+                "xpath=//div[@data-testid='address-search-input']//input"
+            )
+            sleep(1)
+            location_input.input(location_text)
 
-        sleep(2)
-        location_container = tab.ele(
-            "xpath=//div[@data-testid='address-search-container']//div[1]"
-        )
-        location_container.click()
+            sleep(2)
+            location_container = tab.ele(
+                "xpath=//div[@data-testid='address-search-container']//div[1]"
+            )
+            location_container.click()
 
-        sleep(2)
-        confirm_button = tab.ele(
-            "xpath=//div[@class='map-view-with-search-map-container']//button[@data-testid='location-confirm-btn']",
-            timeout=30,
-        )
-        confirm_button.click()
+            sleep(2)
+            confirm_button = tab.ele(
+                "xpath=//div[@class='map-view-with-search-map-container']//button[@data-testid='location-confirm-btn']",
+                timeout=30,
+            )
+            confirm_button.click()
 
-        sleep(3)
-        self.browser.new_tab()
+            sleep(3)
 
-        self.stop_virtual_display()
+        self.client.close_other_tabs(create_new_tab=True)
+        self.client.stop_client(close_browser=False)
 
 
 class ZeptoResponseParser:
@@ -189,23 +227,10 @@ class ZeptoResponseParser:
 
 
 class ZeptoBrowserScraper:
-    def __init__(self, use_virtual_display: bool = False):
-        self.use_virtual_display = use_virtual_display
-        self.init_virtual_display()
-        self.init_browser()
+    def __init__(self):
+        self.client = BrowserClient()
         self.init_paths()
         self.init_resp_parser()
-
-    def init_virtual_display(self):
-        self.is_using_virtual_display = False
-        if self.use_virtual_display:
-            self.display = Display()
-            self.start_virtual_display()
-
-    def init_browser(self):
-        chrome_options = ChromiumOptions()
-        self.browser = Chromium(addr_or_opts=chrome_options)
-        self.chrome_options = chrome_options
 
     def init_paths(self):
         date_str = get_now_str()[:10]
@@ -213,15 +238,6 @@ class ZeptoBrowserScraper:
 
     def init_resp_parser(self):
         self.resp_parser = ZeptoResponseParser()
-
-    def start_virtual_display(self):
-        self.display.start()
-        self.is_using_virtual_display = True
-
-    def stop_virtual_display(self):
-        if self.is_using_virtual_display:
-            self.display.stop()
-            self.is_using_virtual_display = False
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()
@@ -234,15 +250,13 @@ class ZeptoBrowserScraper:
         local_storage_dict = deserialize_str_to_json(local_storage)
         return local_storage_dict
 
-    def new_tab(self) -> ChromiumTab:
-        return self.browser.new_tab()
-
     def fetch(self, product_id: Union[str, int], save_cookies: bool = True) -> dict:
         item_url = f"{ZEPTO_ITEM_URL}/{product_id}"
         logger.note(f"> Visiting product page: {logstr.mesg(brk(product_id))}")
         logger.file(f"  * {item_url}")
 
-        tab = self.browser.latest_tab
+        self.client.start_client()
+        tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
         tab.get(item_url, interval=4)
@@ -257,7 +271,7 @@ class ZeptoBrowserScraper:
             product_info["local_storage"] = self.get_local_storage(tab)
             product_info["product_id"] = product_id
 
-        self.stop_virtual_display()
+        self.client.stop_client(close_browser=False)
         return product_info
 
     def fetch_with_retry(
@@ -371,10 +385,10 @@ class ZeptoProductDataExtractor:
 
 
 def test_browser_scraper():
-    switcher = ZeptoLocationSwitcher(use_virtual_display=False)
+    switcher = ZeptoLocationSwitcher()
     switcher.set_location(location_idx=0)
 
-    scraper = ZeptoBrowserScraper(use_virtual_display=False)
+    scraper = ZeptoBrowserScraper()
     # product_id = "14a11cfe-fd72-4901-bf2e-22bc0aba21c0"
     # product_id = "7851f4a9-cab6-4b75-bae2-bcbc43bf0bdb"
     product_id = "18e5789f-aab8-4281-8db4-380bb50a1c29"
