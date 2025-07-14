@@ -24,24 +24,25 @@ SWIGGY_KEY_COLUMN_MAP = {
 
 
 class SwiggyScrapeBatcher:
-    def __init__(self):
+    def __init__(self, skip_exists: bool = True):
+        self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
         self.switcher = SwiggyLocationSwitcher(use_virtual_display=False)
         self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
         self.extractor = SwiggyProductDataExtractor()
         self.checker = SwiggyLocationChecker()
 
-    def quit_browsers(self):
+    def new_tabs(self):
         try:
-            self.switcher.browser.quit()
+            self.switcher.browser.new_tab()
         except Exception as e:
-            pass
+            logger.warn(f"× SwiggySwitcher: failed new_tab: {e}")
         try:
-            self.scraper.browser.quit()
+            self.scraper.browser.new_tab()
         except Exception as e:
-            pass
+            logger.warn(f"× SwiggyScraper: failed new_tab: {e}")
 
-    def run(self, skip_exists: bool = True):
+    def run(self):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
         for location_idx, location_item in enumerate(SWIGGY_LOCATIONS):
             location_name = location_item.get("name", "")
@@ -59,7 +60,7 @@ class SwiggyScrapeBatcher:
                     )
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
-                if skip_exists and dump_path.exists():
+                if self.skip_exists and dump_path.exists():
                     logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
                     continue
                 if not is_set_location:
@@ -73,7 +74,7 @@ class SwiggyScrapeBatcher:
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
                     sleep(3)
-        self.quit_browsers()
+        self.scraper.browser.new_tab()
 
 
 class SwiggyExtractBatcher:
@@ -174,27 +175,28 @@ class SwiggyBatcherArgParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.add_argument("-s", "--scrape", action="store_true")
         self.add_argument("-e", "--extract", action="store_true")
+        self.add_argument("-f", "--force-scrape", action="store_true")
 
     def parse_args(self):
         self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
         return self.args
 
 
-def run_scrape_batcher():
+def run_scrape_batcher(args: argparse.Namespace):
     try:
-        scraper_batcher = SwiggyScrapeBatcher()
+        scraper_batcher = SwiggyScrapeBatcher(skip_exists=not args.force_scrape)
         scraper_batcher.run()
     except Exception as e:
         logger.warn(e)
         logger.warn(f"> Quiting browsers ...")
         sleep(5)
-        scraper_batcher.quit_browsers()
+        scraper_batcher.new_tabs()
 
 
 def main(args: argparse.Namespace):
     if args.scrape:
         with Retrier(max_retries=5, retry_interval=60) as retrier:
-            retrier.run(run_scrape_batcher)
+            retrier.run(run_scrape_batcher, args)
 
     if args.extract:
         extract_batcher = SwiggyExtractBatcher()
@@ -219,3 +221,4 @@ if __name__ == "__main__":
 
     # Case 3: Batch scrape and extract
     # python -m web.swiggy.batcher -s -e
+    # python -m web.swiggy.batcher -s -e -f
