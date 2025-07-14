@@ -2,17 +2,17 @@ import argparse
 import json
 import sys
 
+from acto import Retrier
 from copy import deepcopy
-from tclogger import logger, logstr, brk, Runtimer, TCLogbar, TCLogbarGroup
-from tclogger import dict_to_str, dict_get, get_now_str
+from tclogger import logger, logstr, brk, get_now_str, Runtimer, TCLogbar, TCLogbarGroup
 from time import sleep
 from pathlib import Path
 from typing import Union
 
 from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
-from web.zepto.scraper import ZeptoBrowserScraper, ZeptoLocationSwitcher
-from web.zepto.scraper import ZeptoProductDataExtractor
+from web.zepto.scraper import ZeptoLocationChecker, ZeptoLocationSwitcher
+from web.zepto.scraper import ZeptoBrowserScraper, ZeptoProductDataExtractor
 
 ZEPTO_INCLUDE_KEYS = ["unit", "price", "price_supersaver", "mrp", "in_stock"]
 ZEPTO_KEY_COLUMN_MAP = {
@@ -24,30 +24,9 @@ ZEPTO_KEY_COLUMN_MAP = {
 }
 
 
-class ZeptoLocationChecker:
-    def check(self, product_info: dict, location_idx: int, extra_msg: str = ""):
-        location_dict = ZEPTO_LOCATIONS[location_idx]
-
-        dump_address = dict_get(
-            product_info, "local_storage.state.userPosition.shortAddress", ""
-        )
-        correct_address = location_dict.get("locality", "")
-        if correct_address.lower() not in dump_address.lower():
-            err_mesg = f"  × {extra_msg}: incorrect location!"
-            logger.warn(err_mesg)
-            product_id = dict_get(product_info, "product_id", "")
-            info_dict = {
-                "product_id": product_id,
-                "dump_address": dump_address,
-                "correct_address": correct_address,
-            }
-            logger.mesg(dict_to_str(info_dict), indent=4)
-            raise ValueError(err_mesg)
-        return True
-
-
 class ZeptoScrapeBatcher:
-    def __init__(self):
+    def __init__(self, skip_exists: bool = True):
+        self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
         # NOTE: switcher MUST be placed before scraper
         # as switcher initializes browser with proxy, while scraper not use proxy;
@@ -55,12 +34,24 @@ class ZeptoScrapeBatcher:
         # once the browser is initialized, its proxy could not be set afterwards;
         # so if switcher is placed after scraper,
         # switcher would not work, as scraper is already initiating a browser without proxy
-        self.switcher = ZeptoLocationSwitcher(use_virtual_display=False)
-        self.scraper = ZeptoBrowserScraper(use_virtual_display=False)
+        self.switcher = ZeptoLocationSwitcher()
+        self.scraper = ZeptoBrowserScraper()
         self.extractor = ZeptoProductDataExtractor()
         self.checker = ZeptoLocationChecker()
 
-    def run(self, skip_exists: bool = True):
+    def close_switcher(self):
+        try:
+            self.switcher.client.close_other_tabs(create_new_tab=True)
+        except Exception as e:
+            logger.warn(f"× ZeptoScrapeBatcher.close_switcher: {e}")
+
+    def close_scraper(self):
+        try:
+            self.scraper.client.close_other_tabs(create_new_tab=True)
+        except Exception as e:
+            logger.warn(f"× ZeptoScrapeBatcher.close_scraper: {e}")
+
+    def run(self):
         zepto_links = self.excel_reader.get_column_by_name("weblink_zepto")
         for location_idx, location_item in enumerate(ZEPTO_LOCATIONS):
             location_name = location_item.get("name", "")
@@ -78,19 +69,19 @@ class ZeptoScrapeBatcher:
                     )
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
-                if skip_exists and dump_path.exists():
-                    logger.note(f"  > Skip exists:")
-                    logger.file(f"    * {dump_path}")
+                if self.skip_exists and dump_path.exists():
+                    logger.note(f"  > Skip exists: {logstr.file(brk(dump_path))}")
                     continue
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 product_info = self.scraper.run(product_id, parent=location_name)
-                self.checker.check(product_info, location_idx)
+                self.checker.check_product_location(product_info, location_idx)
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
                     sleep(3)
+        self.close_scraper()
 
 
 class ZeptoExtractBatcher:
@@ -153,7 +144,9 @@ class ZeptoExtractBatcher:
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(f"  * Skip empty link at row [{link_idx}]")
+                    logger.mesg(
+                        f"  * Skip empty link at row [{link_idx}]", verbose=self.verbose
+                    )
                     row_dicts.append({})
                     continue
                 product_id = link.split("/")[-1].strip()
@@ -161,7 +154,7 @@ class ZeptoExtractBatcher:
                 product_info = self.load_product_info(
                     product_id=product_id, location_name=location_name
                 )
-                self.checker.check(product_info, location_idx)
+                self.checker.check_product_location(product_info, location_idx)
                 extracted_data = self.extractor.extract(product_info)
                 row_dicts.append(extracted_data)
             output_path = self.get_output_path(location_name)
@@ -183,16 +176,29 @@ class ZeptoBatcherArgParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.add_argument("-s", "--scrape", action="store_true")
         self.add_argument("-e", "--extract", action="store_true")
+        self.add_argument("-f", "--force-scrape", action="store_true")
 
     def parse_args(self):
         self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
         return self.args
 
 
+def run_scrape_batcher(skip_exists: bool = True):
+    try:
+        scraper_batcher = ZeptoScrapeBatcher(skip_exists=skip_exists)
+        scraper_batcher.run()
+    except Exception as e:
+        logger.warn(e)
+        logger.warn(f"> Closing tabs ...")
+        sleep(5)
+        scraper_batcher.close_scraper()
+        raise e
+
+
 def main(args: argparse.Namespace):
     if args.scrape:
-        scraper_batcher = ZeptoScrapeBatcher()
-        scraper_batcher.run()
+        with Retrier(max_retries=10, retry_interval=60) as retrier:
+            retrier.run(run_scrape_batcher, skip_exists=not args.force_scrape)
 
     if args.extract:
         extract_batcher = ZeptoExtractBatcher()
@@ -205,6 +211,7 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     arg_parser = ZeptoBatcherArgParser()
     args = arg_parser.parse_args()
+
     with Runtimer():
         main(args)
 
@@ -213,3 +220,6 @@ if __name__ == "__main__":
 
     # Case 2: Batch extract
     # python -m web.zepto.batcher -e
+
+    # Case 3: Batch scrape and extract
+    # python -m web.zepto.batcher -s -e
