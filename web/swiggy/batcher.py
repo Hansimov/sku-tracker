@@ -27,20 +27,22 @@ class SwiggyScrapeBatcher:
     def __init__(self, skip_exists: bool = True):
         self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
-        self.switcher = SwiggyLocationSwitcher(use_virtual_display=False)
-        self.scraper = SwiggyBrowserScraper(use_virtual_display=False)
+        self.switcher = SwiggyLocationSwitcher()
+        self.scraper = SwiggyBrowserScraper()
         self.extractor = SwiggyProductDataExtractor()
         self.checker = SwiggyLocationChecker()
 
-    def new_tabs(self):
+    def close_switcher(self):
         try:
-            self.switcher.browser.new_tab()
+            self.switcher.client.close_other_tabs(create_new_tab=True)
         except Exception as e:
-            logger.warn(f"× SwiggySwitcher: failed new_tab: {e}")
+            logger.warn(f"× SwiggyScrapeBatcher.close_switcher: {e}")
+
+    def close_scraper(self):
         try:
-            self.scraper.browser.new_tab()
+            self.scraper.client.close_other_tabs(create_new_tab=True)
         except Exception as e:
-            logger.warn(f"× SwiggyScraper: failed new_tab: {e}")
+            logger.warn(f"× SwiggyScrapeBatcher.close_scraper: {e}")
 
     def run(self):
         swiggy_links = self.excel_reader.get_column_by_name("weblink_instamart")
@@ -74,7 +76,8 @@ class SwiggyScrapeBatcher:
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
                     sleep(3)
-        self.scraper.browser.new_tab()
+
+        self.close_scraper()
 
 
 class SwiggyExtractBatcher:
@@ -182,21 +185,22 @@ class SwiggyBatcherArgParser(argparse.ArgumentParser):
         return self.args
 
 
-def run_scrape_batcher(args: argparse.Namespace):
+def run_scrape_batcher(skip_exists: bool = True):
     try:
-        scraper_batcher = SwiggyScrapeBatcher(skip_exists=not args.force_scrape)
+        scraper_batcher = SwiggyScrapeBatcher(skip_exists=skip_exists)
         scraper_batcher.run()
     except Exception as e:
         logger.warn(e)
-        logger.warn(f"> Quiting browsers ...")
+        logger.warn(f"> Closing tabs ...")
         sleep(5)
-        scraper_batcher.new_tabs()
+        scraper_batcher.close_scraper()
+        raise e
 
 
 def main(args: argparse.Namespace):
     if args.scrape:
-        with Retrier(max_retries=5, retry_interval=60) as retrier:
-            retrier.run(run_scrape_batcher, args)
+        with Retrier(max_retries=10, retry_interval=60) as retrier:
+            retrier.run(run_scrape_batcher, skip_exists=not args.force_scrape)
 
     if args.extract:
         extract_batcher = SwiggyExtractBatcher()
