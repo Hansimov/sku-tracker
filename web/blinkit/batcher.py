@@ -2,16 +2,17 @@ import argparse
 import json
 import sys
 
+from acto import Retrier
 from copy import deepcopy
-from tclogger import logger, logstr, brk, Runtimer, TCLogbar, TCLogbarGroup
-from tclogger import dict_to_str, dict_get, get_now_str
+from tclogger import logger, logstr, brk, get_now_str, Runtimer, TCLogbar, TCLogbarGroup
+
 from time import sleep
 from pathlib import Path
 from typing import Union
-from urllib.parse import unquote
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
+from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
 from web.blinkit.scraper import BlinkitBrowserScraper, BlinkitProductDataExtractor
 
 BLINKIT_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
@@ -24,51 +25,67 @@ BLINKIT_KEY_COLUMN_MAP = {
 
 
 class BlinkitScrapeBatcher:
-    def __init__(self):
+    def __init__(self, skip_exists: bool = True):
+        self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
-        self.scraper = BlinkitBrowserScraper(use_virtual_display=False)
+        self.switcher = BlinkitLocationSwitcher()
+        self.checker = BlinkitLocationChecker()
+        self.scraper = BlinkitBrowserScraper()
         self.extractor = BlinkitProductDataExtractor()
+
+    def close_switcher(self):
+        try:
+            self.switcher.client.close_other_tabs(create_new_tab=True)
+        except Exception as e:
+            logger.warn(f"× BlinkitScrapeBatcher.close_switcher: {e}")
+
+    def close_scraper(self):
+        try:
+            self.scraper.client.close_other_tabs(create_new_tab=True)
+        except Exception as e:
+            logger.warn(f"× BlinkitScrapeBatcher.close_scraper: {e}")
 
     def run(self):
         blinkit_links = self.excel_reader.get_column_by_name("weblink_blinkit")
         for location_idx, location_item in enumerate(BLINKIT_LOCATIONS):
-            self.scraper.new_tab()
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
-            is_set_location = False
-            logger.hint(f"> New Location: {location_name} ({location_text})")
             links = blinkit_links[:]
-            links_count = len(links)
+            is_set_location = False
             for link_idx, link in enumerate(links):
                 if not link:
                     logger.mesg(f"> Skip empty link at row [{link_idx}]")
                     continue
                 else:
                     logger.note(
-                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(links_count)}]",
+                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(len(links))}]",
                         end=" ",
                     )
-                product_id = link.split("/")[-1]
+                product_id = link.split("/")[-1].strip()
+                dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
+                if self.skip_exists and dump_path.exists():
+                    logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                    continue
                 if not is_set_location:
-                    location_idx = location_idx
+                    logger.hint(f"> New Location: {location_name} ({location_text})")
+                    self.switcher.set_location(location_idx)
                     is_set_location = True
-                else:
-                    location_idx = None
-                product_info = self.scraper.run(
-                    product_id,
-                    location_idx=location_idx,
-                    save_cookies=True,
-                    parent=location_name,
+                product_info = self.scraper.run(product_id, parent=location_name)
+                self.checker.check_product_location(
+                    product_info, location_idx, extra_msg="BlinkitScrapeBatcher"
                 )
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(1)
+                    sleep(3)
+
+        self.close_scraper()
 
 
 class BlinkitExtractBatcher:
     def __init__(self, verbose: bool = False):
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = BlinkitProductDataExtractor()
+        self.checker = BlinkitLocationChecker()
         self.verbose = verbose
         self.init_paths()
 
@@ -109,23 +126,6 @@ class BlinkitExtractBatcher:
         logger.exit_quiet(not self.verbose)
         return product_info
 
-    def check_location(self, product_info: dict, location_idx: int):
-        location_dict = BLINKIT_LOCATIONS[location_idx]
-        dump_locality = dict_get(product_info, ["cookies", "gr_1_locality"], "")
-        dump_landmark = dict_get(product_info, ["cookies", "gr_1_landmark"], "")
-        correct_locality = location_dict.get("locality", "")
-        if unquote(dump_locality.lower()) != unquote(correct_locality.lower()):
-            err_mesg = f"  × Location dumpped incorrectly!"
-            logger.warn(err_mesg)
-            info_dict = {
-                "dump_locality": dump_locality,
-                "dump_landmark": dump_landmark,
-                "correct_locality": correct_locality,
-            }
-            logger.mesg(dict_to_str(info_dict), indent=4)
-            raise ValueError(err_mesg)
-        return True
-
     def run(self):
         blinkit_links = self.excel_reader.get_column_by_name("weblink_blinkit")
         location_bar = TCLogbar(total=len(BLINKIT_LOCATIONS), head="Location:")
@@ -141,15 +141,23 @@ class BlinkitExtractBatcher:
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(f"* Skip empty link at row [{link_idx}]")
+                    logger.mesg(
+                        f"  * Skip empty link at row [{link_idx}]", verbose=self.verbose
+                    )
                     row_dicts.append({})
                     continue
-                product_id = link.split("/")[-1]
+                product_id = link.split("/")[-1].strip()
                 product_bar.set_desc(logstr.mesg(brk(product_id)))
                 product_info = self.load_product_info(
                     product_id=product_id, location_name=location_name
                 )
-                self.check_location(product_info, location_idx)
+                try:
+                    self.checker.check_product_location(
+                        product_info, location_idx, extra_msg="BlinkitExtractBatcher"
+                    )
+                except Exception as e:
+                    logger.warn(f"    * {product_id}")
+                    raise e
                 extracted_data = self.extractor.extract(product_info)
                 row_dicts.append(extracted_data)
             output_path = self.get_output_path(location_name)
@@ -171,16 +179,29 @@ class BlinkitBatcherArgParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.add_argument("-s", "--scrape", action="store_true")
         self.add_argument("-e", "--extract", action="store_true")
+        self.add_argument("-f", "--force-scrape", action="store_true")
 
     def parse_args(self):
         self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
         return self.args
 
 
+def run_scrape_batcher(skip_exists: bool = True):
+    try:
+        scraper_batcher = BlinkitScrapeBatcher(skip_exists=skip_exists)
+        scraper_batcher.run()
+    except Exception as e:
+        logger.warn(e)
+        logger.warn(f"> Closing tabs ...")
+        sleep(5)
+        scraper_batcher.close_scraper()
+        raise e
+
+
 def main(args: argparse.Namespace):
     if args.scrape:
-        scraper_batcher = BlinkitScrapeBatcher()
-        scraper_batcher.run()
+        with Retrier(max_retries=10, retry_interval=60) as retrier:
+            retrier.run(run_scrape_batcher, skip_exists=not args.force_scrape)
 
     if args.extract:
         extract_batcher = BlinkitExtractBatcher()
