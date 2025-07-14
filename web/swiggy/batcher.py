@@ -4,8 +4,7 @@ import sys
 
 from acto import Retrier
 from copy import deepcopy
-from tclogger import logger, logstr, brk, Runtimer, TCLogbar, TCLogbarGroup
-from tclogger import get_now_str
+from tclogger import logger, logstr, brk, get_now_str, Runtimer, TCLogbar, TCLogbarGroup
 from time import sleep
 from pathlib import Path
 from typing import Union
@@ -61,8 +60,7 @@ class SwiggyScrapeBatcher:
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
                 if skip_exists and dump_path.exists():
-                    logger.note(f"  > Skip exists:")
-                    logger.file(f"    * {dump_path}")
+                    logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
                     continue
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
@@ -75,6 +73,7 @@ class SwiggyScrapeBatcher:
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
                     sleep(3)
+        self.quit_browsers()
 
 
 class SwiggyExtractBatcher:
@@ -137,7 +136,9 @@ class SwiggyExtractBatcher:
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(f"  * Skip empty link at row [{link_idx}]")
+                    logger.mesg(
+                        f"  * Skip empty link at row [{link_idx}]", verbose=self.verbose
+                    )
                     row_dicts.append({})
                     continue
                 product_id = link.split("/")[-1].strip()
@@ -179,16 +180,21 @@ class SwiggyBatcherArgParser(argparse.ArgumentParser):
         return self.args
 
 
+def run_scrape_batcher():
+    try:
+        scraper_batcher = SwiggyScrapeBatcher()
+        scraper_batcher.run()
+    except Exception as e:
+        logger.warn(e)
+        logger.warn(f"> Quiting browsers ...")
+        sleep(5)
+        scraper_batcher.quit_browsers()
+
+
 def main(args: argparse.Namespace):
     if args.scrape:
-        scraper_batcher = SwiggyScrapeBatcher()
-        try:
-            scraper_batcher.run()
-        except Exception as e:
-            logger.warn(e)
-            logger.warn(f"> Quiting browsers ...")
-            sleep(5)
-            scraper_batcher.quit_browsers()
+        with Retrier(max_retries=5, retry_interval=60) as retrier:
+            retrier.run(run_scrape_batcher)
 
     if args.extract:
         extract_batcher = SwiggyExtractBatcher()
@@ -201,11 +207,9 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     arg_parser = SwiggyBatcherArgParser()
     args = arg_parser.parse_args()
-    timer = Runtimer()
-    retrier = Retrier(max_retries=5, retry_interval=60)
-    with timer:
-        with retrier:
-            retrier.run(main, args)
+
+    with Runtimer():
+        main(args)
 
     # Case 1: Batch scrape
     # python -m web.swiggy.batcher -s
