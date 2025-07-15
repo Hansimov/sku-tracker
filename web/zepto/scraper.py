@@ -103,6 +103,7 @@ class ZeptoLocationSwitcher:
 
             sleep(3)
             location_button = tab.ele("xpath=//button[@aria-label='Select Location']")
+            logger.mesg(f"  * Click location select ...")
             location_button.click()
 
             sleep(1)
@@ -110,19 +111,22 @@ class ZeptoLocationSwitcher:
                 "xpath=//div[@data-testid='address-search-input']//input"
             )
             sleep(1)
+            logger.mesg(f"  * Input target location text ...")
             location_input.input(location_text)
 
             sleep(2)
             location_container = tab.ele(
                 "xpath=//div[@data-testid='address-search-container']//div[1]"
             )
+            logger.mesg(f"  * Click most-related location suggestion ...")
             location_container.click()
 
             sleep(2)
             confirm_button = tab.ele(
-                "xpath=//div[@class='map-view-with-search-map-container']//button[@data-testid='location-confirm-btn']",
+                "xpath=//button[@data-testid='location-confirm-btn']",
                 timeout=30,
             )
+            logger.mesg(f"  * Click confirm button ...")
             confirm_button.click()
 
             sleep(3)

@@ -80,7 +80,7 @@ class ZeptoScrapeBatcher:
                 self.checker.check_product_location(product_info, location_idx)
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(3)
+                    sleep(2)
         self.close_scraper()
 
 

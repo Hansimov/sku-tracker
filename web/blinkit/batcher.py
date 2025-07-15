@@ -76,7 +76,7 @@ class BlinkitScrapeBatcher:
                 )
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(3)
+                    sleep(2)
 
         self.close_scraper()
 

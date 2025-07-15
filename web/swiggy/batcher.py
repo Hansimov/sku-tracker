@@ -75,7 +75,7 @@ class SwiggyScrapeBatcher:
                 )
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(3)
+                    sleep(2)
 
         self.close_scraper()
 
@@ -199,7 +199,7 @@ def run_scrape_batcher(skip_exists: bool = True):
 
 def main(args: argparse.Namespace):
     if args.scrape:
-        with Retrier(max_retries=10, retry_interval=60) as retrier:
+        with Retrier(max_retries=30, retry_interval=60) as retrier:
             retrier.run(run_scrape_batcher, skip_exists=not args.force_scrape)
 
     if args.extract:
