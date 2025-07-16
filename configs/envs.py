@@ -12,5 +12,7 @@ SECRETS = OSEnver(SECRETS_PATH)
 BLINKIT_LOCATIONS = SECRETS["blinkit_locations"]
 SWIGGY_LOCATIONS = SECRETS["swiggy_locations"]
 ZEPTO_LOCATIONS = SECRETS["zepto_locations"]
+LOCATION_LIST = SECRETS["location_list"]
+LOCATION_MAP = SECRETS["location_map"]
 SKU_XLSX = DATA_ROOT / SECRETS["sku_xlsx"]
 HTTP_PROXY = SECRETS["http_proxy"]

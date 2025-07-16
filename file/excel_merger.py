@@ -1,24 +1,40 @@
+import argparse
 import pandas as pd
 import openpyxl
+import sys
 import warnings
 
 from pathlib import Path
 from tclogger import logger, logstr, brk, get_now_str
 
-from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
+from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-LOCATION_NAMES = [loc.get("name", "") for loc in BLINKIT_LOCATIONS]
 WEBSITE_NAMES = ["blinkit", "zepto", "swiggy"]
+
+
+def get_location_val(location: str) -> str:
+    return LOCATION_MAP.get(location, location)
+
+
+class DataframeEditor:
+    def insert_date_and_location_columns(
+        self, df: pd.DataFrame, location_name: str, date_str: str
+    ) -> pd.DataFrame:
+        if "date" not in df.columns:
+            date_val = date_str.replace("-", "/")
+            df.insert(0, "Date", date_val)
+        if "location" not in df.columns:
+            location_val = get_location_val(location_name)
+            df.insert(1, "Location", location_val)
+        return df
 
 
 class ExcelMerger:
     def __init__(self, date_str: str = None):
-        if date_str:
-            self.date_str = date_str
-        else:
-            self.date_str = get_now_str()[:10]
+        self.date_str = date_str or get_now_str()[:10]
+        self.editor = DataframeEditor()
         self.init_paths()
         self.init_workbook()
 
@@ -82,7 +98,7 @@ class ExcelMerger:
 
     def write_df_to_sheet(self, df: pd.DataFrame, location_name: str):
         """Write dataframe to new sheet in workbook"""
-        sheet_name = f"{location_name.capitalize()}_{self.date_str}"
+        sheet_name = f"{self.date_str}_{get_location_val(location_name)}"
         sheet = self.workbook.create_sheet(title=sheet_name)
 
         # write headers
@@ -96,13 +112,16 @@ class ExcelMerger:
 
     def merge(self):
         logger.note(f"> Merging xlsx files for:")
-        logger.mesg(f"  * locations: {logstr.file(LOCATION_NAMES)}")
+        logger.mesg(f"  * locations: {logstr.file(LOCATION_LIST)}")
         logger.mesg(f"  * websites : {logstr.file(WEBSITE_NAMES)}")
-        for location_name in LOCATION_NAMES:
+        for location_name in LOCATION_LIST:
             df_list = self.read_df_list_from_xlsx_files_with_same_location(
                 location_name
             )
             merged_df = self.merge_dfs(df_list)
+            merged_df = self.editor.insert_date_and_location_columns(
+                merged_df, location_name, self.date_str
+            )
             self.write_df_to_sheet(merged_df, location_name)
 
         logger.note(f"> Save merged xlsx to:")
@@ -110,8 +129,21 @@ class ExcelMerger:
         logger.okay(f"  * {self.output_merge_path}")
 
 
+class ExcelMergerArgParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.add_argument("-d", "--date", type=str, default=None)
+
+    def parse_args(self):
+        self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
+        return self.args
+
+
 if __name__ == "__main__":
-    merger = ExcelMerger()
+    arg_parser = ExcelMergerArgParser()
+    args = arg_parser.parse_args()
+
+    merger = ExcelMerger(date_str=args.date)
     merger.merge()
 
     # Case 1: Extract data from websites and save to Excel files
