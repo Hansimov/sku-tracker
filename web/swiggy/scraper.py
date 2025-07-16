@@ -217,17 +217,25 @@ class SwiggyProductDataExtractor:
         # get in_stock flag (Y/N/-)
         in_stock = dict_get(item_state, "in_stock", None)
         if in_stock is True:
-            in_stock_flag = "Y"
+            in_stock_flag = 1
         elif in_stock is False:
-            in_stock_flag = "N"
+            in_stock_flag = 0
         else:
-            in_stock_flag = "-"
+            in_stock_flag = "N/A"
 
-        # get price, mrp, unit
+        # get price, mrp
         price_dict = dict_get(var0, "price", {})
         price = dict_get(price_dict, "offer_price", None)
         mrp = dict_get(price_dict, "mrp", None)
+
+        # get unit
         unit = dict_get(var0, "quantity", None)
+        if isinstance(unit, str) and "combo" in unit.lower():
+            try:
+                var1 = dict_get(item_state, ["variations", 1], {})
+                unit = dict_get(var1, "quantity", unit)
+            except Exception as e:
+                logger.warn("  × No more variation found for combo unit")
 
         product_data = {
             "product_name": product_name,

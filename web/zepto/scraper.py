@@ -303,7 +303,7 @@ class ZeptoBrowserScraper:
         self, product_id: Union[str, int], save_cookies: bool = True, parent: str = None
     ) -> dict:
         product_info = fetch_with_retry(
-            self.fetch, product_id=product_id, save_cookies=save_cookies
+            self.fetch, product_id=product_id, save_cookies=save_cookies, max_retries=5
         )
         self.dump(product_id=product_id, resp=product_info, parent=parent)
         return product_info
@@ -332,12 +332,16 @@ class ZeptoProductDataExtractor:
 
         # get in_stock flag (Y/N/-)
         available_num = dict_get(product, "availableQuantity", None)
-        in_stock_flag = "-"
-        if isinstance(available_num, int):
+
+        if available_num is None:
+            in_stock_flag = 0
+        elif isinstance(available_num, int):
             if available_num > 0:
-                in_stock_flag = "Y"
+                in_stock_flag = 1
             else:
-                in_stock_flag = "N"
+                in_stock_flag = 0
+        else:
+            in_stock_flag = "N/A"
 
         # get price, mrp, unit
         price = dict_get(product, "discountedSellingPrice", None)
