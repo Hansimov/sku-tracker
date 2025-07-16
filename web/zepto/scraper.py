@@ -138,10 +138,12 @@ class ZeptoLocationSwitcher:
 
 class ZeptoResponseParser:
     def extract_resp(self, html: str) -> list:
-        pattern = r'__next_f\.push\(\[1,\s*"c:(.*?)"\]\)'
+        pattern = r'__next_f\.push\(\[1,\s*"\w+:(.*?)"\]\)'
         matches = re.findall(pattern, html, flags=re.DOTALL)
         results = []
         for match in matches:
+            if "pageLayout" not in match:
+                continue
             data = deserialize_str_to_json(match)
             results.append(data)
         if len(results) == 1:

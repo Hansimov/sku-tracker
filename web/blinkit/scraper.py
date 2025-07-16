@@ -187,7 +187,7 @@ class BlinkitBrowserScraper:
         tab.listen.start(targets=listen_targets)
 
         tab.get(prn_url)
-        logger.okay(f"  ✓ Title: {brk(tab.title)}")
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
 
         logger.note(f"  > Listening targets:")
         for target in listen_targets:

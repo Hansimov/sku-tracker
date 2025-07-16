@@ -26,6 +26,8 @@ def fetch_with_retry(
             logger.note(f"  > Retry ({retry_count}/{max_retries})")
             sleep(retry_interval)
         else:
-            logger.warn(f"  × Exceed max retries ({max_retries}). Fetch aborted.")
-            raise e
+            err_mesg = f"  × Exceed max retries ({max_retries}). Fetch aborted."
+            logger.warn(err_mesg)
+            raise RuntimeError(err_mesg)
+
     return res
