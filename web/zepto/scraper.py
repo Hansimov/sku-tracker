@@ -11,6 +11,7 @@ from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS, HTTP_PROXY
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
 
+WEBSITE_NAME = "zepto"
 ZEPTO_MAIN_URL = "https://www.zeptonow.com"
 ZEPTO_ITEM_URL = "https://www.zeptonow.com/pn/x/pvid"
 ZEPTO_PAGE_URL = "https://cdn.bff.zeptonow.com/api/v2/get_page"
@@ -234,14 +235,15 @@ class ZeptoResponseParser:
 
 
 class ZeptoBrowserScraper:
-    def __init__(self):
+    def __init__(self, date_str: str = None):
+        self.date_str = date_str
         self.client = BrowserClient()
         self.init_paths()
         self.init_resp_parser()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "zepto"
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
 
     def init_resp_parser(self):
         self.resp_parser = ZeptoResponseParser()

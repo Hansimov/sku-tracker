@@ -14,6 +14,7 @@ from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 from cli.arg import BatcherArgParser
 
+WEBSITE_NAME = "swiggy"
 SWIGGY_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
 SWIGGY_KEY_COLUMN_MAP = {
     "unit": "unit size_instamart",
@@ -24,11 +25,11 @@ SWIGGY_KEY_COLUMN_MAP = {
 
 
 class SwiggyScrapeBatcher:
-    def __init__(self, skip_exists: bool = True):
+    def __init__(self, skip_exists: bool = True, date_str: str = None):
         self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
         self.switcher = SwiggyLocationSwitcher()
-        self.scraper = SwiggyBrowserScraper()
+        self.scraper = SwiggyBrowserScraper(date_str=date_str)
         self.extractor = SwiggyProductDataExtractor()
         self.checker = SwiggyLocationChecker()
 
@@ -81,18 +82,18 @@ class SwiggyScrapeBatcher:
 
 
 class SwiggyExtractBatcher:
-    def __init__(self, verbose: bool = False):
+    def __init__(self, date_str: str = None, verbose: bool = False):
+        self.date_str = date_str
+        self.verbose = verbose
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = SwiggyProductDataExtractor()
         self.checker = SwiggyLocationChecker()
-        self.verbose = verbose
         self.init_paths()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "swiggy"
-        self.output_root = DATA_ROOT / "output" / date_str / "swiggy"
-        self.date_str = date_str
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
+        self.output_root = DATA_ROOT / "output" / self.date_str / WEBSITE_NAME
 
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
         filename = f"{product_id}.json"

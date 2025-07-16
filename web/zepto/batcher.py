@@ -14,6 +14,7 @@ from web.zepto.scraper import ZeptoLocationChecker, ZeptoLocationSwitcher
 from web.zepto.scraper import ZeptoBrowserScraper, ZeptoProductDataExtractor
 from cli.arg import BatcherArgParser
 
+WEBSITE_NAME = "zepto"
 ZEPTO_INCLUDE_KEYS = ["unit", "price", "price_supersaver", "mrp", "in_stock"]
 ZEPTO_KEY_COLUMN_MAP = {
     "unit": "unit size_zepto",
@@ -25,7 +26,7 @@ ZEPTO_KEY_COLUMN_MAP = {
 
 
 class ZeptoScrapeBatcher:
-    def __init__(self, skip_exists: bool = True):
+    def __init__(self, skip_exists: bool = True, date_str: str = None):
         self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
         # NOTE: switcher MUST be placed before scraper
@@ -35,7 +36,7 @@ class ZeptoScrapeBatcher:
         # so if switcher is placed after scraper,
         # switcher would not work, as scraper is already initiating a browser without proxy
         self.switcher = ZeptoLocationSwitcher()
-        self.scraper = ZeptoBrowserScraper()
+        self.scraper = ZeptoBrowserScraper(date_str=date_str)
         self.extractor = ZeptoProductDataExtractor()
         self.checker = ZeptoLocationChecker()
 
@@ -85,7 +86,9 @@ class ZeptoScrapeBatcher:
 
 
 class ZeptoExtractBatcher:
-    def __init__(self, verbose: bool = False):
+    def __init__(self, date_str: str = None, verbose: bool = False):
+        self.date_str = date_str
+        self.verbose = verbose
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = ZeptoProductDataExtractor()
         self.checker = ZeptoLocationChecker()
@@ -93,10 +96,9 @@ class ZeptoExtractBatcher:
         self.init_paths()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "zepto"
-        self.output_root = DATA_ROOT / "output" / date_str / "zepto"
-        self.date_str = date_str
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
+        self.output_root = DATA_ROOT / "output" / self.date_str / WEBSITE_NAME
 
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
         filename = f"{product_id}.json"

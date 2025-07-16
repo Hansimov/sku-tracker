@@ -12,6 +12,7 @@ from web.clicker import LocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
 
+WEBSITE_NAME = "blinkit"
 BLINKIT_MAIN_URL = "https://blinkit.com"
 BLINKIT_FLAG_URL = "https://blinkit.com/api/feature-flags/receive"
 BLINKIT_MAP_URL = "https://blinkit.com/mapAPI/autosuggest_google"
@@ -130,7 +131,8 @@ class BlinkitBrowserScraper:
     * https://github.com/ponty/PyVirtualDisplay
     """
 
-    def __init__(self):
+    def __init__(self, date_str: str = None):
+        self.date_str = date_str
         self.client = BrowserClient()
         self.checker = BlinkitLocationChecker()
         self.init_paths()
@@ -139,8 +141,8 @@ class BlinkitBrowserScraper:
         self.clicker = LocationClicker()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "blinkit"
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()

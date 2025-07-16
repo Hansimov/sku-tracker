@@ -12,6 +12,7 @@ from web.clicker import SwiggyLocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
 
+WEBSITE_NAME = "swiggy"
 SWIGGY_MAIN_URL = "https://www.swiggy.com"
 SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
 
@@ -121,13 +122,14 @@ class SwiggyLocationSwitcher:
 
 
 class SwiggyBrowserScraper:
-    def __init__(self):
+    def __init__(self, date_str: str = None):
+        self.date_str = date_str
         self.client = BrowserClient()
         self.init_paths()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "swiggy"
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()

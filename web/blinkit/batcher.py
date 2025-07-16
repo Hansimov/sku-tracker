@@ -15,6 +15,7 @@ from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
 from web.blinkit.scraper import BlinkitBrowserScraper, BlinkitProductDataExtractor
 from cli.arg import BatcherArgParser
 
+WEBSITE_NAME = "blinkit"
 BLINKIT_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
 BLINKIT_KEY_COLUMN_MAP = {
     "unit": "unit size_blinkit",
@@ -25,12 +26,12 @@ BLINKIT_KEY_COLUMN_MAP = {
 
 
 class BlinkitScrapeBatcher:
-    def __init__(self, skip_exists: bool = True):
+    def __init__(self, skip_exists: bool = True, date_str: str = None):
         self.skip_exists = skip_exists
         self.excel_reader = ExcelReader()
         self.switcher = BlinkitLocationSwitcher()
         self.checker = BlinkitLocationChecker()
-        self.scraper = BlinkitBrowserScraper()
+        self.scraper = BlinkitBrowserScraper(date_str=date_str)
         self.extractor = BlinkitProductDataExtractor()
 
     def close_switcher(self):
@@ -82,18 +83,18 @@ class BlinkitScrapeBatcher:
 
 
 class BlinkitExtractBatcher:
-    def __init__(self, verbose: bool = False):
+    def __init__(self, date_str: str = None, verbose: bool = False):
+        self.date_str = date_str
+        self.verbose = verbose
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = BlinkitProductDataExtractor()
         self.checker = BlinkitLocationChecker()
-        self.verbose = verbose
         self.init_paths()
 
     def init_paths(self):
-        date_str = get_now_str()[:10]
-        self.dump_root = DATA_ROOT / "dumps" / date_str / "blinkit"
-        self.output_root = DATA_ROOT / "output" / date_str / "blinkit"
-        self.date_str = date_str
+        self.date_str = self.date_str or get_now_str()[:10]
+        self.dump_root = DATA_ROOT / "dumps" / self.date_str / WEBSITE_NAME
+        self.output_root = DATA_ROOT / "output" / self.date_str / WEBSITE_NAME
 
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
         filename = f"{product_id}.json"
