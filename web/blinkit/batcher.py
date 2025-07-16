@@ -110,7 +110,9 @@ class BlinkitExtractBatcher:
             output_path = self.output_root / "output.xlsx"
         return output_path
 
-    def load_product_info(self, product_id: str, location_name: str = None) -> dict:
+    def load_product_info(
+        self, product_id: str, location_name: str = None
+    ) -> tuple[dict, Path]:
         logger.enter_quiet(not self.verbose)
         logger.note(f"  > Loading product info: {brk(logstr.mesg(product_id))}")
         product_info = {}
@@ -124,7 +126,7 @@ class BlinkitExtractBatcher:
             logger.warn(f"  × File not found: {brk(logstr.file(product_info_path))}")
             raise e
         logger.exit_quiet(not self.verbose)
-        return product_info
+        return product_info, product_info_path
 
     def run(self):
         blinkit_links = self.excel_reader.get_column_by_name("weblink_blinkit")
@@ -148,7 +150,7 @@ class BlinkitExtractBatcher:
                     continue
                 product_id = link.split("/")[-1].strip()
                 product_bar.set_desc(logstr.mesg(brk(product_id)))
-                product_info = self.load_product_info(
+                product_info, product_info_path = self.load_product_info(
                     product_id=product_id, location_name=location_name
                 )
                 try:
@@ -156,7 +158,10 @@ class BlinkitExtractBatcher:
                         product_info, location_idx, extra_msg="BlinkitExtractBatcher"
                     )
                 except Exception as e:
-                    logger.warn(f"    * {product_id}")
+                    logger.warn(
+                        f"    * blinkit.{location_name}.{product_id}: "
+                        f"{logstr.file(brk(product_info_path))}"
+                    )
                     raise e
                 extracted_data = self.extractor.extract(product_info)
                 row_dicts.append(extracted_data)

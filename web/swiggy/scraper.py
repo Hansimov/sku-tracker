@@ -38,7 +38,7 @@ class SwiggyLocationChecker:
         local_address_str = self.unify_address(local_address)
         correct_address_str = self.unify_address(correct_address)
         if local_address_str != correct_address_str:
-            err_mesg = f"  × {extra_msg}: incorrect location!"
+            err_mesg = f"\n  × {extra_msg}: incorrect location!"
             logger.warn(err_mesg)
             info_dict = {
                 "local_address": local_address,

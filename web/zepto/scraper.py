@@ -36,7 +36,7 @@ class ZeptoLocationChecker:
         if not local_address:
             return False
         if correct_address.lower() not in local_address.lower():
-            err_mesg = f"  × {extra_msg}: incorrect location!"
+            err_mesg = f"\n  × {extra_msg}: incorrect location!"
             logger.warn(err_mesg)
             info_dict = {
                 "local_address": local_address,
