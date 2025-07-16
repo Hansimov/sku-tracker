@@ -1,6 +1,5 @@
 import argparse
 import json
-import sys
 
 from acto import Retrier
 from copy import deepcopy
@@ -13,6 +12,7 @@ from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
+from cli.arg import BatcherArgParser
 
 SWIGGY_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
 SWIGGY_KEY_COLUMN_MAP = {
@@ -178,21 +178,11 @@ class SwiggyExtractBatcher:
         print()
 
 
-class SwiggyBatcherArgParser(argparse.ArgumentParser):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.add_argument("-s", "--scrape", action="store_true")
-        self.add_argument("-e", "--extract", action="store_true")
-        self.add_argument("-f", "--force-scrape", action="store_true")
-
-    def parse_args(self):
-        self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
-        return self.args
-
-
-def run_scrape_batcher(skip_exists: bool = True):
+def run_scrape_batcher(args: argparse.Namespace):
     try:
-        scraper_batcher = SwiggyScrapeBatcher(skip_exists=skip_exists)
+        scraper_batcher = SwiggyScrapeBatcher(
+            skip_exists=not args.force_scrape, date_str=args.date
+        )
         scraper_batcher.run()
     except Exception as e:
         logger.warn(e)
@@ -205,18 +195,15 @@ def run_scrape_batcher(skip_exists: bool = True):
 def main(args: argparse.Namespace):
     if args.scrape:
         with Retrier(max_retries=30, retry_interval=60) as retrier:
-            retrier.run(run_scrape_batcher, skip_exists=not args.force_scrape)
+            retrier.run(run_scrape_batcher, args=args)
 
     if args.extract:
-        extract_batcher = SwiggyExtractBatcher()
+        extract_batcher = SwiggyExtractBatcher(date_str=args.date)
         extract_batcher.run()
-
-    if not (args.scrape or args.extract):
-        logger.warn("No valid argument: `-s` for scrape or `-e` for extract.")
 
 
 if __name__ == "__main__":
-    arg_parser = SwiggyBatcherArgParser()
+    arg_parser = BatcherArgParser()
     args = arg_parser.parse_args()
 
     with Runtimer():
