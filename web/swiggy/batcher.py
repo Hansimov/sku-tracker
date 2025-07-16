@@ -75,7 +75,7 @@ class SwiggyScrapeBatcher:
                 )
                 extracted_data = self.extractor.extract(product_info)
                 if extracted_data:
-                    sleep(2)
+                    sleep(3)
 
         self.close_scraper()
 

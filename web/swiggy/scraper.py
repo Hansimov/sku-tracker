@@ -1,10 +1,8 @@
 import json
 import urllib.parse
 
-from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from pyvirtualdisplay import Display
 from tclogger import logger, logstr, brk, get_now_str, dict_to_str, dict_get, dict_set
 from time import sleep
 from typing import Union
@@ -12,6 +10,7 @@ from typing import Union
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from web.clicker import SwiggyLocationClicker
 from web.browser import BrowserClient
+from web.fetch import fetch_with_retry
 
 SWIGGY_MAIN_URL = "https://www.swiggy.com"
 SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
@@ -164,33 +163,6 @@ class SwiggyBrowserScraper:
         self.client.stop_client(close_browser=False)
         return product_info
 
-    def fetch_with_retry(
-        self,
-        product_id: Union[str, int],
-        save_cookies: bool = True,
-        max_retries: int = 3,
-    ):
-        retry_count = 0
-        res = None
-        while retry_count < max_retries:
-            try:
-                res = self.fetch(product_id=product_id, save_cookies=save_cookies)
-                if res:
-                    break
-            except Exception as e:
-                logger.warn(f"  × Fetch failed: {e}")
-
-            retry_count += 1
-            if retry_count < max_retries:
-                logger.note(f"  > Retry ({retry_count}/{max_retries})")
-                sleep(3)
-            else:
-                err_mesg = f"  × Exceed max retries ({max_retries}), aborted"
-                logger.warn(err_mesg)
-                raise RuntimeError(err_mesg)
-
-        return res
-
     def get_dump_path(self, product_id: Union[str, int], parent: str = None) -> Path:
         filename = f"{product_id}.json"
         if parent:
@@ -200,18 +172,18 @@ class SwiggyBrowserScraper:
         return dump_path
 
     def dump(self, product_id: Union[str, int], resp: dict, parent: str = None):
-        logger.note(f"  > Dumping product data to json ...")
+        logger.note(f"  > Dump product data to json:", end=" ")
         dump_path = self.get_dump_path(product_id, parent)
         dump_path.parent.mkdir(parents=True, exist_ok=True)
         with open(dump_path, "w", encoding="utf-8") as wf:
             json.dump(resp, wf, indent=4, ensure_ascii=False)
-        logger.okay(f"    * {dump_path}")
+        logger.okay(f"{brk(dump_path)}")
 
     def run(
         self, product_id: Union[str, int], save_cookies: bool = True, parent: str = None
     ) -> dict:
-        product_info = self.fetch_with_retry(
-            product_id=product_id, save_cookies=save_cookies
+        product_info = fetch_with_retry(
+            self.fetch, product_id=product_id, save_cookies=save_cookies
         )
         self.dump(product_id=product_id, resp=product_info, parent=parent)
         return product_info
