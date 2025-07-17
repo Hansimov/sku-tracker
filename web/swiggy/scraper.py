@@ -195,7 +195,7 @@ class SwiggyProductDataExtractor:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
 
-    def extract(self, resp: dict) -> dict:
+    def extract_varirant(self, resp: dict, var_idx: int = 0) -> dict:
         logger.enter_quiet(not self.verbose)
         if not resp:
             logger.warn("  × Empty response data to extract")
@@ -208,11 +208,11 @@ class SwiggyProductDataExtractor:
         item_state = dict_get(
             resp, ["instamart", "cachedProductItemData", "lastItemState"], {}
         )
-        var0 = dict_get(item_state, ["variations", 0], {})
+        variant = dict_get(item_state, ["variations", var_idx], {})
 
         # get product_id, product_name
         product_id = dict_get(item_state, "product_id", None)
-        product_name = dict_get(var0, "display_name", None)
+        product_name = dict_get(variant, "display_name", None)
 
         # get in_stock flag (Y/N/-)
         in_stock = dict_get(item_state, "in_stock", None)
@@ -223,19 +223,11 @@ class SwiggyProductDataExtractor:
         else:
             in_stock_flag = "N/A"
 
-        # get price, mrp
-        price_dict = dict_get(var0, "price", {})
+        # get price, mrp, unit
+        price_dict = dict_get(variant, "price", {})
         price = dict_get(price_dict, "offer_price", None)
         mrp = dict_get(price_dict, "mrp", None)
-
-        # get unit
-        unit = dict_get(var0, "quantity", None)
-        if isinstance(unit, str) and "combo" in unit.lower():
-            try:
-                var1 = dict_get(item_state, ["variations", 1], {})
-                unit = dict_get(var1, "quantity", unit)
-            except Exception as e:
-                logger.warn("  × No more variation found for combo unit")
+        unit = dict_get(variant, "quantity", None)
 
         product_data = {
             "product_name": product_name,
@@ -244,11 +236,63 @@ class SwiggyProductDataExtractor:
             "price": price,
             "mrp": mrp,
             "in_stock": in_stock_flag,
+            "var_idx": var_idx,
         }
         logger.okay(dict_to_str(product_data), indent=4)
         logger.exit_quiet(not self.verbose)
 
         return product_data
+
+    def is_price_close(
+        self,
+        price: Union[float, int],
+        ref_price: Union[float, int],
+        max_diff_ratio: float = 0.5,
+    ) -> bool:
+        ratio = abs(price - ref_price) / min(price, ref_price)
+        return ratio < max_diff_ratio
+
+    def check_by_ref(self, res: dict, ref_mrp: Union[int, float] = None) -> bool:
+        mrp = res.get("mrp", None)
+        if not self.is_price_close(mrp, ref_mrp):
+            product_id = res.get("product_id", "")
+            diff = abs(mrp - ref_mrp) / min(mrp, ref_mrp)
+            logger.warn(
+                f"\n  × Outlier variant: [{product_id}]"
+                f"\n  * mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})"
+            )
+
+    def extract_closet_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
+        variants = dict_get(
+            resp, "instamart.cachedProductItemData.lastItemState.variations", []
+        )
+        res = {}
+        variant_num = len(variants)
+        for var_idx in range(variant_num):
+            variant_data = self.extract_varirant(resp, var_idx=var_idx)
+            variant_mrp = variant_data.get("mrp", None)
+            if var_idx == 0:
+                mrp_diff = abs(variant_mrp - ref_mrp)
+                res = variant_data
+                continue
+            if variant_mrp is not None:
+                diff = abs(variant_mrp - ref_mrp)
+                if diff < mrp_diff:
+                    mrp_diff = diff
+                    res = variant_data
+        if res:
+            self.check_by_ref(res, ref_mrp=ref_mrp)
+        else:
+            url = dict_get(resp, "cookies.url", "")
+            logger.warn(f"\n  × No variant: {url}", verbose=self.verbose)
+        return res
+
+    def extract(self, resp: dict, ref_mrp: Union[int, float] = None) -> list[dict]:
+        """If `ref_mrp` is not None, would choose variant whose `mrp` is closest to `ref_mrp`."""
+        if ref_mrp is None or ref_mrp <= 0:
+            return self.extract_varirant(resp, var_idx=0)
+        else:
+            return self.extract_closet_variant(resp, ref_mrp=ref_mrp)
 
 
 def test_browser_scraper():
