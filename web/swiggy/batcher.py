@@ -1,9 +1,11 @@
 import argparse
 import json
+import pandas as pd
 
 from acto import Retrier
 from copy import deepcopy
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, TCLogbar, TCLogbarGroup
+from tclogger import match_val
 from time import sleep
 from pathlib import Path
 from typing import Union
@@ -12,6 +14,8 @@ from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
+from web.blinkit.batcher import BlinkitExtractBatcher
+from web.zepto.batcher import ZeptoExtractBatcher
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "swiggy"
@@ -81,12 +85,46 @@ class SwiggyScrapeBatcher:
         self.close_scraper()
 
 
+class RefProductDataLoader:
+    def __init__(self, date_str: str = None) -> None:
+        self.date_str = date_str
+        self.blinkit_batcher = BlinkitExtractBatcher(date_str=date_str)
+        self.zepto_batcher = ZeptoExtractBatcher(date_str=date_str)
+
+    def get_product_id(self, df: pd.DataFrame, col_name: str, idx: int) -> str:
+        product_info_row = df.iloc[idx]
+        product_link = product_info_row.get(col_name, "")
+        product_id = product_link.split("/")[-1].strip()
+        return product_id
+
+    def load(self, location_name: str, idx: int) -> Union[int, float]:
+        product_data = {}
+        for col, batcher, df in zip(
+            ["weblink_blinkit", "weblink_zepto"],
+            [self.blinkit_batcher, self.zepto_batcher],
+            [self.blinkit_batcher.excel_reader.df, self.zepto_batcher.excel_reader.df],
+        ):
+            col_name, _, _ = match_val(col, df.columns.to_list(), use_fuzz=True)
+            product_id = self.get_product_id(df, col_name=col_name, idx=idx)
+            if not product_id:
+                continue
+            product_info, _ = batcher.load_product_info(
+                product_id=product_id, location_name=location_name
+            )
+            product_data = batcher.extractor.extract(product_info)
+            if product_data.get("mrp"):
+                break
+        mrp = product_data.get("mrp", None)
+        return mrp
+
+
 class SwiggyExtractBatcher:
     def __init__(self, date_str: str = None, verbose: bool = False):
         self.date_str = date_str
         self.verbose = verbose
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = SwiggyProductDataExtractor()
+        self.ref_loader = RefProductDataLoader(date_str=date_str)
         self.checker = SwiggyLocationChecker()
         self.init_paths()
 
@@ -163,7 +201,10 @@ class SwiggyExtractBatcher:
                         f"{logstr.file(brk(product_info_path))}"
                     )
                     raise e
-                extracted_data = self.extractor.extract(product_info)
+                ref_mrp = self.ref_loader.load(
+                    location_name=location_name, idx=link_idx
+                )
+                extracted_data = self.extractor.extract(product_info, ref_mrp=ref_mrp)
                 row_dicts.append(extracted_data)
             output_path = self.get_output_path(location_name)
             renamed_row_dicts = df_parser.rename_row_dicts_keys_to_column(
