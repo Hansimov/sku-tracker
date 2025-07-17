@@ -185,9 +185,16 @@ class ExcelMerger:
 
     def set_sheet_styles(self, sheet: Worksheet):
         logger.note(f"> Setting sheet styles ...")
-        # set column of discount to be number format of "percent"
+        # set discount columns number_format to percentage
         for _, col_map in DISCOUNT_COLUMNS_MAP.items():
             discount_col = col_map["disc"]
+            # get discount column idx in header
+            for col_idx, cell in enumerate(sheet[1], 1):
+                if cell.value == discount_col:
+                    # apply to entire column
+                    for row in range(2, sheet.max_row + 1):
+                        sheet.cell(row=row, column=col_idx).number_format = "0%"
+                    break
 
     def write_df_to_sheet(self, df: pd.DataFrame, location_name: str):
         """Write dataframe to new sheet in workbook"""
