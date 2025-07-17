@@ -133,7 +133,7 @@ class ZeptoLocationSwitcher:
 
             sleep(3)
 
-        self.client.close_other_tabs(create_new_tab=True)
+        # self.client.close_other_tabs(create_new_tab=True)
         self.client.stop_client(close_browser=False)
 
 
