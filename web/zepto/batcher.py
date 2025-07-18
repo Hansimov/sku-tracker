@@ -49,6 +49,7 @@ class ZeptoScrapeBatcher:
     def close_scraper(self):
         try:
             self.scraper.client.close_other_tabs(create_new_tab=True)
+            self.scraper.client.stop_client(close_browser=True)
         except Exception as e:
             logger.warn(f"× ZeptoScrapeBatcher.close_scraper: {e}")
 
