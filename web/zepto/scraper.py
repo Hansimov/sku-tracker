@@ -10,6 +10,7 @@ from typing import Union
 from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS, HTTP_PROXY
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
+from file.local_dump import LocalAddressExtractor
 
 WEBSITE_NAME = "zepto"
 ZEPTO_MAIN_URL = "https://www.zeptonow.com"
@@ -312,6 +313,7 @@ class ZeptoBrowserScraper:
 class ZeptoProductDataExtractor:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+        self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
     def extract(self, info: dict) -> dict:
         logger.enter_quiet(not self.verbose)
@@ -355,6 +357,9 @@ class ZeptoProductDataExtractor:
             price_supersaver = price_supersaver // 100
         unit = dict_get(prd_info, "productVariant.formattedPacksize", None)
 
+        # get location
+        location = self.addr_extractor.get_column_location(info)
+
         product_data = {
             "product_name": product_name,
             "product_id": product_id,
@@ -363,6 +368,7 @@ class ZeptoProductDataExtractor:
             "price_supersaver": price_supersaver,
             "mrp": mrp,
             "in_stock": in_stock_flag,
+            "location": location,
         }
         logger.okay(dict_to_str(product_data), indent=4)
         logger.exit_quiet(not self.verbose)

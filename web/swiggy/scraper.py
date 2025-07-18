@@ -11,6 +11,7 @@ from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
 from web.clicker import SwiggyLocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
+from file.local_dump import LocalAddressExtractor
 
 WEBSITE_NAME = "swiggy"
 SWIGGY_MAIN_URL = "https://www.swiggy.com"
@@ -115,7 +116,7 @@ class SwiggyLocationSwitcher:
             self.clicker.set_location_image_name(location_shot)
             self.clicker.click_target_position()
 
-            sleep(5)
+            sleep(10)
 
         # self.client.close_other_tabs(create_new_tab=True)
         self.client.stop_client(close_browser=False)
@@ -194,6 +195,7 @@ class SwiggyBrowserScraper:
 class SwiggyProductDataExtractor:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+        self.address_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
     def extract_varirant(self, resp: dict, var_idx: int = 0) -> dict:
         logger.enter_quiet(not self.verbose)
@@ -229,6 +231,9 @@ class SwiggyProductDataExtractor:
         mrp = dict_get(price_dict, "mrp", None)
         unit = dict_get(variant, "quantity", None)
 
+        # get location
+        location = self.address_extractor.get_column_location(resp)
+
         product_data = {
             "product_name": product_name,
             "product_id": product_id,
@@ -237,6 +242,7 @@ class SwiggyProductDataExtractor:
             "mrp": mrp,
             "in_stock": in_stock_flag,
             "var_idx": var_idx,
+            "location": location,
         }
         logger.okay(dict_to_str(product_data), indent=4)
         logger.exit_quiet(not self.verbose)

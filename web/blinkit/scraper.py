@@ -11,6 +11,7 @@ from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from web.clicker import LocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
+from file.local_dump import LocalAddressExtractor
 
 WEBSITE_NAME = "blinkit"
 BLINKIT_MAIN_URL = "https://blinkit.com"
@@ -114,7 +115,7 @@ class BlinkitLocationSwitcher:
             self.clicker.set_location_image_name(location_shot)
             sleep(2)
             self.clicker.click_target_position()
-            sleep(5)
+            sleep(10)
 
         # self.client.close_other_tabs(create_new_tab=True)
         self.client.stop_client(close_browser=False)
@@ -251,6 +252,7 @@ class BlinkitBrowserScraper:
 class BlinkitProductDataExtractor:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+        self.address_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
     def extract(self, resp: dict) -> dict:
         logger.enter_quiet(not self.verbose)
@@ -289,6 +291,9 @@ class BlinkitProductDataExtractor:
                 unit = attr.get("value")
                 break
 
+        # get location
+        location = self.address_extractor.get_column_location(resp)
+
         product_data = {
             "product_name": product_name,
             "product_id": product_id,
@@ -296,6 +301,7 @@ class BlinkitProductDataExtractor:
             "price": price,
             "mrp": mrp,
             "unit": unit,
+            "location": location,
         }
         logger.okay(dict_to_str(product_data), indent=4)
         logger.exit_quiet(not self.verbose)
