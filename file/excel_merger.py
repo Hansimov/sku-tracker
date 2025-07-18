@@ -36,6 +36,7 @@ DISCOUNT_COLUMNS_MAP = {
         "mrp": "mrp_zepto",
     },
 }
+EXCLUDE_COLUMNS = ["location_blinkit", "location_zepto", "location_instamart"]
 
 
 def get_location_val(location: str) -> str:
@@ -43,6 +44,21 @@ def get_location_val(location: str) -> str:
 
 
 class DataframeEditor:
+    def remove_columns(
+        self,
+        df: pd.DataFrame,
+        columns: list[str] = EXCLUDE_COLUMNS,
+        inplace: bool = True,
+    ) -> pd.DataFrame:
+        logger.note(f"> Removing columns: {logstr.file(columns)}")
+        if not inplace:
+            df = df.copy()
+        for col in columns:
+            col_name, _, _ = match_val(col, df.columns.tolist(), use_fuzz=True)
+            if col_name in df.columns:
+                df.drop(columns=col_name, inplace=True)
+        return df
+
     def insert_date_and_location_columns(
         self, df: pd.DataFrame, location_name: str, date_str: str
     ) -> pd.DataFrame:
@@ -223,6 +239,7 @@ class ExcelMerger:
             merged_df = self.editor.insert_date_and_location_columns(
                 merged_df, location_name, self.date_str
             )
+            merged_df = self.editor.remove_columns(merged_df)
             print(merged_df)
             self.write_df_to_sheet(merged_df, location_name)
 
