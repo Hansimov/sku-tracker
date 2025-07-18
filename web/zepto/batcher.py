@@ -12,16 +12,25 @@ from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.zepto.scraper import ZeptoLocationChecker, ZeptoLocationSwitcher
 from web.zepto.scraper import ZeptoBrowserScraper, ZeptoProductDataExtractor
+from file.local_dump import LocalAddressExtractor
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "zepto"
-ZEPTO_INCLUDE_KEYS = ["unit", "price", "price_supersaver", "mrp", "in_stock"]
+ZEPTO_INCLUDE_KEYS = [
+    "unit",
+    "price",
+    "price_supersaver",
+    "mrp",
+    "in_stock",
+    "location",
+]
 ZEPTO_KEY_COLUMN_MAP = {
     "unit": "unit size_zepto",
     "price": "price_zepto",
     "price_supersaver": "price_supersaver_zepto",
     "mrp": "mrp_zepto",
     "in_stock": "instock_zepto",
+    "location": "location_zepto",
 }
 
 
@@ -38,6 +47,7 @@ class ZeptoScrapeBatcher:
         self.switcher = ZeptoLocationSwitcher()
         self.scraper = ZeptoBrowserScraper(date_str=date_str)
         self.extractor = ZeptoProductDataExtractor()
+        self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
         self.checker = ZeptoLocationChecker()
 
     def close_switcher(self):
@@ -72,8 +82,15 @@ class ZeptoScrapeBatcher:
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
                 if self.skip_exists and dump_path.exists():
-                    logger.note(f"  > Skip exists: {logstr.file(brk(dump_path))}")
-                    continue
+                    if self.addr_extractor.check_dump_path_location(
+                        dump_path, correct_location_name=location_name
+                    ):
+                        logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                        continue
+                    else:
+                        logger.warn(f"> Remove local dump file, and re-scrape")
+                        logger.file(f"  * {dump_path}")
+                        dump_path.unlink(missing_ok=True)
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)

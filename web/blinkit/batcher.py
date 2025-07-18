@@ -13,15 +13,17 @@ from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
 from web.blinkit.scraper import BlinkitBrowserScraper, BlinkitProductDataExtractor
+from file.local_dump import LocalAddressExtractor
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "blinkit"
-BLINKIT_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
+BLINKIT_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock", "location"]
 BLINKIT_KEY_COLUMN_MAP = {
     "unit": "unit size_blinkit",
     "price": "price_blinkit",
     "mrp": "mrp_blinkit",
     "in_stock": "instock_blinkit",
+    "location": "location_blinkit",
 }
 
 
@@ -33,6 +35,7 @@ class BlinkitScrapeBatcher:
         self.checker = BlinkitLocationChecker()
         self.scraper = BlinkitBrowserScraper(date_str=date_str)
         self.extractor = BlinkitProductDataExtractor()
+        self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
     def close_switcher(self):
         try:
@@ -65,8 +68,15 @@ class BlinkitScrapeBatcher:
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
                 if self.skip_exists and dump_path.exists():
-                    logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
-                    continue
+                    if self.addr_extractor.check_dump_path_location(
+                        dump_path, correct_location_name=location_name
+                    ):
+                        logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                        continue
+                    else:
+                        logger.warn(f"> Remove local dump file, and re-scrape")
+                        logger.file(f"  * {dump_path}")
+                        dump_path.unlink(missing_ok=True)
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)

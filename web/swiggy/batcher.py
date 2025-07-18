@@ -1,6 +1,7 @@
 import argparse
 import json
 import pandas as pd
+import shutil
 
 from acto import Retrier
 from copy import deepcopy
@@ -16,15 +17,17 @@ from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 from web.blinkit.batcher import BlinkitExtractBatcher
 from web.zepto.batcher import ZeptoExtractBatcher
+from file.local_dump import LocalAddressExtractor
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "swiggy"
-SWIGGY_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock"]
+SWIGGY_INCLUDE_KEYS = ["unit", "price", "mrp", "in_stock", "location"]
 SWIGGY_KEY_COLUMN_MAP = {
     "unit": "unit size_instamart",
     "price": "price_instamart",
     "mrp": "mrp_instamart",
     "in_stock": "instock_instamart",
+    "location": "location_instamart",
 }
 
 
@@ -35,6 +38,7 @@ class SwiggyScrapeBatcher:
         self.switcher = SwiggyLocationSwitcher()
         self.scraper = SwiggyBrowserScraper(date_str=date_str)
         self.extractor = SwiggyProductDataExtractor()
+        self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
         self.checker = SwiggyLocationChecker()
 
     def close_switcher(self):
@@ -68,8 +72,15 @@ class SwiggyScrapeBatcher:
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
                 if self.skip_exists and dump_path.exists():
-                    logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
-                    continue
+                    if self.addr_extractor.check_dump_path_location(
+                        dump_path, correct_location_name=location_name
+                    ):
+                        logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                        continue
+                    else:
+                        logger.warn(f"> Remove local dump file, and re-scrape")
+                        logger.file(f"  * {dump_path}")
+                        dump_path.unlink(missing_ok=True)
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)
