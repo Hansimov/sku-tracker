@@ -3,7 +3,8 @@ import re
 
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from tclogger import logger, logstr, brk, get_now_str, dict_to_str, dict_get, dict_set
+from tclogger import logger, logstr, brk, get_now_str, dict_to_str
+from tclogger import dict_get, dict_set, match_val
 from time import sleep
 from typing import Union
 
@@ -310,10 +311,22 @@ class ZeptoBrowserScraper:
         return product_info
 
 
+UNITS_MAP = {"GRAM": "g", "KILOGRAM": "kg", "LITER": "L", "MILLILITRE": "ml"}
+UNIT_KEYS = list(UNITS_MAP.keys())
+
+
 class ZeptoProductDataExtractor:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
+
+    def get_size_unit_str(
+        self, packsize: Union[int, float], unit_of_measure: str
+    ) -> str:
+        full_unit, _, _ = match_val(unit_of_measure, UNIT_KEYS, use_fuzz=True)
+        unit_str = UNITS_MAP.get(full_unit, full_unit)
+        size_unit_str = f"{packsize} {unit_str}"
+        return size_unit_str.strip()
 
     def extract(self, info: dict) -> dict:
         logger.enter_quiet(not self.verbose)
@@ -345,7 +358,7 @@ class ZeptoProductDataExtractor:
         else:
             in_stock_flag = "N/A"
 
-        # get price, mrp, unit
+        # get price, mrp
         price = dict_get(product, "discountedSellingPrice", None)
         if price is not None:
             price = price // 100
@@ -355,7 +368,15 @@ class ZeptoProductDataExtractor:
         price_supersaver = dict_get(product, "superSaverSellingPrice", None)
         if price_supersaver is not None:
             price_supersaver = price_supersaver // 100
-        unit = dict_get(prd_info, "productVariant.formattedPacksize", None)
+
+        # get unit
+        variant = dict_get(prd_info, "productVariant", {})
+        unit = dict_get(variant, "formattedPacksize", None)
+        if not unit:
+            packsize = dict_get(variant, "packsize", None)
+            unit_of_measure = dict_get(variant, "unitOfMeasure", "")
+            if packsize and unit_of_measure:
+                unit = self.get_size_unit_str(packsize, unit_of_measure)
 
         # get location
         location = self.addr_extractor.get_column_location(info)

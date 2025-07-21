@@ -264,8 +264,8 @@ class SwiggyProductDataExtractor:
             product_id = res.get("product_id", "")
             diff = abs(mrp - ref_mrp) / min(mrp, ref_mrp)
             logger.warn(
-                f"\n  × Outlier variant: [{product_id}]"
-                f"\n  * mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})"
+                f"\n  × Outlier variant [{product_id}]: "
+                f"mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})\n"
             )
 
     def extract_closet_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
