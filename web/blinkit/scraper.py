@@ -122,16 +122,6 @@ class BlinkitLocationSwitcher:
 
 
 class BlinkitBrowserScraper:
-    """Install dependencies:
-    ```sh
-    sudo apt-get install xvfb xserver-xephyr tigervnc-standalone-server x11-utils gnumeric
-    pip install pyvirtualdisplay pillow EasyProcess pyautogui mss
-    ```
-
-    See: ponty/PyVirtualDisplay: Python wrapper for Xvfb, Xephyr and Xvnc
-    * https://github.com/ponty/PyVirtualDisplay
-    """
-
     def __init__(self, date_str: str = None):
         self.date_str = date_str
         self.client = BrowserClient()

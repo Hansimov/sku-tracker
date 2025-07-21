@@ -5,6 +5,24 @@ from tclogger import logger
 
 
 class BrowserClient:
+    """Install dependencies:
+    ```sh
+    sudo apt-get install xvfb xserver-xephyr tigervnc-standalone-server x11-utils gnumeric
+    pip install pyvirtualdisplay pillow EasyProcess pyautogui mss
+    ```
+
+    See: ponty/PyVirtualDisplay: Python wrapper for Xvfb, Xephyr and Xvnc
+    * https://github.com/ponty/PyVirtualDisplay
+
+    See also: [Bug]: Missing X server or $DISPLAY · Issue #8148 · puppeteer/puppeteer
+        * https://github.com/puppeteer/puppeteer/issues/8148
+
+    ```sh
+    # xdpyinfo -display :10.0
+    export DISPLAY=localhost:10.0
+    ```
+    """
+
     def __init__(self, use_virtual_display: bool = False, proxy: str = None):
         self.use_virtual_display = use_virtual_display
         self.proxy = proxy
@@ -54,3 +72,12 @@ class BrowserClient:
             if create_new_tab:
                 self.browser.new_tab()
             self.browser.latest_tab.close(others=True)
+
+
+if __name__ == "__main__":
+    client = BrowserClient(use_virtual_display=False)
+    client.start_client()
+    tab = client.browser.new_tab()
+    client.stop_client(close_browser=True)
+
+    # python -m web.browser
