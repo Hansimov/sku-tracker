@@ -32,8 +32,14 @@ SWIGGY_KEY_COLUMN_MAP = {
 
 
 class SwiggyScrapeBatcher:
-    def __init__(self, skip_exists: bool = True, date_str: str = None):
+    def __init__(
+        self,
+        skip_exists: bool = True,
+        date_str: str = None,
+        close_browser_after_done: bool = False,
+    ):
         self.skip_exists = skip_exists
+        self.close_browser_after_done = close_browser_after_done
         self.excel_reader = ExcelReader()
         self.switcher = SwiggyLocationSwitcher()
         self.scraper = SwiggyBrowserScraper(date_str=date_str)
@@ -50,6 +56,8 @@ class SwiggyScrapeBatcher:
     def close_scraper(self):
         try:
             self.scraper.client.close_other_tabs(create_new_tab=True)
+            if self.close_browser_after_done:
+                self.scraper.client.stop_client(close_browser=True)
         except Exception as e:
             logger.warn(f"× SwiggyScrapeBatcher.close_scraper: {e}")
 
@@ -234,7 +242,9 @@ class SwiggyExtractBatcher:
 def run_scrape_batcher(args: argparse.Namespace):
     try:
         scraper_batcher = SwiggyScrapeBatcher(
-            skip_exists=not args.force_scrape, date_str=args.date
+            skip_exists=not args.force_scrape,
+            date_str=args.date,
+            close_browser_after_done=args.close_browser_after_done,
         )
         scraper_batcher.run()
     except Exception as e:

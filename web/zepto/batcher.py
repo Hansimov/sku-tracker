@@ -35,8 +35,14 @@ ZEPTO_KEY_COLUMN_MAP = {
 
 
 class ZeptoScrapeBatcher:
-    def __init__(self, skip_exists: bool = True, date_str: str = None):
+    def __init__(
+        self,
+        skip_exists: bool = True,
+        date_str: str = None,
+        close_browser_after_done: bool = True,
+    ):
         self.skip_exists = skip_exists
+        self.close_browser_after_done = close_browser_after_done
         self.excel_reader = ExcelReader()
         # NOTE: switcher MUST be placed before scraper
         # as switcher initializes browser with proxy, while scraper not use proxy;
@@ -59,7 +65,8 @@ class ZeptoScrapeBatcher:
     def close_scraper(self):
         try:
             self.scraper.client.close_other_tabs(create_new_tab=True)
-            self.scraper.client.stop_client(close_browser=True)
+            if self.close_browser_after_done:
+                self.scraper.client.stop_client(close_browser=True)
         except Exception as e:
             logger.warn(f"× ZeptoScrapeBatcher.close_scraper: {e}")
 
@@ -205,7 +212,9 @@ class ZeptoExtractBatcher:
 def run_scrape_batcher(args: argparse.Namespace):
     try:
         scraper_batcher = ZeptoScrapeBatcher(
-            skip_exists=not args.force_scrape, date_str=args.date
+            skip_exists=not args.force_scrape,
+            date_str=args.date,
+            close_browser_after_done=args.close_browser_after_done,
         )
         scraper_batcher.run()
     except Exception as e:

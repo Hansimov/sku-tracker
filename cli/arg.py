@@ -9,6 +9,7 @@ class BatcherArgParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.add_argument("-s", "--scrape", action="store_true")
         self.add_argument("-e", "--extract", action="store_true")
+        self.add_argument("-c", "--close-browser-after-done", action="store_true")
         self.add_argument("-f", "--force-scrape", action="store_true")
         self.add_argument("-d", "--date", type=str, default=None)
 
