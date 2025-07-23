@@ -1,5 +1,6 @@
 from pathlib import Path
 from tclogger import OSEnver
+from typing import Literal
 
 REPO_ROOT = Path(__file__).parents[1]
 CONFIGS_ROOT = REPO_ROOT / "configs"
@@ -24,3 +25,6 @@ EMAIL_SENDER = SECRETS["email_sender"]
 EMAIL_RECVER = SECRETS["email_recver"]
 SKU_XLSX = DATA_ROOT / SECRETS["sku_xlsx"]
 HTTP_PROXY = SECRETS["http_proxy"]
+
+WEBSITE_NAMES = ["blinkit", "zepto", "swiggy"]
+WEBSITE_LITERAL = Literal["blinkit", "zepto", "swiggy"]

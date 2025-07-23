@@ -196,7 +196,7 @@ class SwiggyProductDataExtractor:
         self.verbose = verbose
         self.address_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
-    def extract_varirant(self, resp: dict, var_idx: int = 0) -> dict:
+    def extract_variant(self, resp: dict, var_idx: int = 0) -> dict:
         logger.enter_quiet(not self.verbose)
         if not resp:
             logger.warn("  × Empty response data to extract")
@@ -267,14 +267,14 @@ class SwiggyProductDataExtractor:
                 f"mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})\n"
             )
 
-    def extract_closet_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
+    def extract_closest_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
         variants = dict_get(
             resp, "instamart.cachedProductItemData.lastItemState.variations", []
         )
         res = {}
         variant_num = len(variants)
         for var_idx in range(variant_num):
-            variant_data = self.extract_varirant(resp, var_idx=var_idx)
+            variant_data = self.extract_variant(resp, var_idx=var_idx)
             variant_mrp = variant_data.get("mrp", None)
             if var_idx == 0:
                 mrp_diff = abs(variant_mrp - ref_mrp)
@@ -295,9 +295,9 @@ class SwiggyProductDataExtractor:
     def extract(self, resp: dict, ref_mrp: Union[int, float] = None) -> list[dict]:
         """If `ref_mrp` is not None, would choose variant whose `mrp` is closest to `ref_mrp`."""
         if ref_mrp is None or ref_mrp <= 0:
-            return self.extract_varirant(resp, var_idx=0)
+            return self.extract_variant(resp, var_idx=0)
         else:
-            return self.extract_closet_variant(resp, ref_mrp=ref_mrp)
+            return self.extract_closest_variant(resp, ref_mrp=ref_mrp)
 
 
 def test_browser_scraper():

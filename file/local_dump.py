@@ -5,6 +5,7 @@ from tclogger import logger, dict_get, match_val
 from typing import Literal
 
 from configs.envs import BLINKIT_LOCATIONS, SWIGGY_LOCATIONS, ZEPTO_LOCATIONS
+from configs.envs import WEBSITE_LITERAL
 
 
 WEBSITE_DUMP_ADDRESS_KEYS_DICT = {
@@ -20,7 +21,7 @@ WEBSITE_LOCATIONS_DICT = {
 
 
 class LocalAddressExtractor:
-    def __init__(self, website_name: Literal["blinkit", "swiggy", "zepto"]):
+    def __init__(self, website_name: WEBSITE_LITERAL):
         self.website_name = website_name
         self.address_keys = WEBSITE_DUMP_ADDRESS_KEYS_DICT.get(website_name, "")
         self.locations = WEBSITE_LOCATIONS_DICT.get(website_name, {})

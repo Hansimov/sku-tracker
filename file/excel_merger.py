@@ -9,11 +9,10 @@ from pathlib import Path
 from tclogger import logger, logstr, brk, get_now_str, match_val
 from typing import Union, Literal
 
-from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP
+from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP, WEBSITE_NAMES
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-WEBSITE_NAMES = ["blinkit", "zepto", "swiggy"]
 DISCOUNT_COLUMNS_MAP = {
     "blinkit": {
         "disc": "Disc_Blinkit",
