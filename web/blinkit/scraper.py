@@ -7,8 +7,8 @@ from time import sleep
 from typing import Union
 from urllib.parse import unquote
 
-from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS
-from web.clicker import LocationClicker
+from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_BROWSER_SETTING
+from web.clicker import BlinkitLocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
 from file.local_dump import LocalAddressExtractor
@@ -76,14 +76,10 @@ class BlinkitLocationChecker:
 class BlinkitLocationSwitcher:
     def __init__(self):
         self.checker = BlinkitLocationChecker()
-        self.client = BrowserClient()
-
-    def create_clicker(self):
-        self.clicker = LocationClicker()
+        self.client = BrowserClient(**BLINKIT_BROWSER_SETTING)
 
     def set_location(self, location_idx: int = 0) -> dict:
         self.client.start_client()
-        self.create_clicker()
         tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
@@ -96,24 +92,28 @@ class BlinkitLocationSwitcher:
             logger.okay("  * Location already correctly set. Skip.")
         else:
             logger.note(f"  > Setting location:")
+            self.clicker = BlinkitLocationClicker(tab=tab, suffix=WEBSITE_NAME)
             location_dict = BLINKIT_LOCATIONS[location_idx]
             location_text = location_dict.get("text", "")
             location_shot = location_dict.get("shot", "")
             logger.file(f"    * {location_text}")
             location_bar = tab.ele(".^LocationBar__SubtitleContainer")
             sleep(2)
+            logger.note(f"  > Clicking location_bar ...")
             location_bar.click()
             sleep(2)
             location_input = tab.ele('xpath://input[@name="select-locality"]')
+            logger.note(f"  > Inputting location_text ...")
             location_input.input(location_text)
             sleep(2)
             selected_address = tab.ele(".^LocationSearchList__LocationDetailContainer")
             selected_address_label = selected_address.ele(
                 ".^LocationSearchList__LocationLabel"
             ).text
-            logger.note(f"  > Selected address: {logstr.okay(selected_address_label)}")
+            logger.note(f"  > Selected address: {logstr.mesg(selected_address_label)}")
             self.clicker.set_location_image_name(location_shot)
             sleep(2)
+            logger.note(f"  > Clicking target location item ...")
             self.clicker.click_target_position()
             sleep(10)
 
@@ -124,12 +124,9 @@ class BlinkitLocationSwitcher:
 class BlinkitBrowserScraper:
     def __init__(self, date_str: str = None):
         self.date_str = date_str
-        self.client = BrowserClient()
+        self.client = BrowserClient(**BLINKIT_BROWSER_SETTING)
         self.checker = BlinkitLocationChecker()
         self.init_paths()
-
-    def create_clicker(self):
-        self.clicker = LocationClicker()
 
     def init_paths(self):
         self.date_str = self.date_str or get_now_str()[:10]

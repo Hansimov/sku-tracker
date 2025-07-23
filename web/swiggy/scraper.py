@@ -7,7 +7,7 @@ from tclogger import logger, logstr, brk, get_now_str, dict_to_str, dict_get, di
 from time import sleep
 from typing import Union
 
-from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS
+from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS, SWIGGY_BROWSER_SETTING
 from web.clicker import SwiggyLocationClicker
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
@@ -81,15 +81,11 @@ class SwiggyLocationChecker:
 class SwiggyLocationSwitcher:
     def __init__(self):
         self.checker = SwiggyLocationChecker()
-        self.client = BrowserClient()
-
-    def create_clicker(self):
-        self.clicker = SwiggyLocationClicker()
+        self.client = BrowserClient(**SWIGGY_BROWSER_SETTING)
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(SWIGGY_MAIN_URL))}")
         self.client.start_client()
-        self.create_clicker()
         tab = self.client.browser.latest_tab
         tab.set.load_mode.none()
 
@@ -101,6 +97,7 @@ class SwiggyLocationSwitcher:
         ):
             logger.okay("  * Location already correctly set. Skip.")
         else:
+            self.clicker = SwiggyLocationClicker(tab=tab, suffix=WEBSITE_NAME)
             logger.note(f"> Setting location:")
             location_dict = SWIGGY_LOCATIONS[location_idx]
             location_name = location_dict.get("name", "")
@@ -109,10 +106,12 @@ class SwiggyLocationSwitcher:
             logger.file(f"  * {location_name} ({location_text})")
 
             sleep(3)
+            logger.note(f"  > Inputting location text ...")
             self.clicker.set_location_image_name("swiggy_loc_main.png")
             self.clicker.type_target_location_text(location_text)
 
             sleep(3)
+            logger.note(f"  > Clicking target location item ...")
             self.clicker.set_location_image_name(location_shot)
             self.clicker.click_target_position()
 
@@ -125,7 +124,7 @@ class SwiggyLocationSwitcher:
 class SwiggyBrowserScraper:
     def __init__(self, date_str: str = None):
         self.date_str = date_str
-        self.client = BrowserClient()
+        self.client = BrowserClient(**SWIGGY_BROWSER_SETTING)
         self.init_paths()
 
     def init_paths(self):

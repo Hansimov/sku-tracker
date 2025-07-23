@@ -8,7 +8,7 @@ from tclogger import dict_get, dict_set, match_val
 from time import sleep
 from typing import Union
 
-from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS, HTTP_PROXY
+from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS, ZEPTO_BROWSER_SETTING
 from web.browser import BrowserClient
 from web.fetch import fetch_with_retry
 from file.local_dump import LocalAddressExtractor
@@ -83,7 +83,7 @@ class ZeptoLocationChecker:
 class ZeptoLocationSwitcher:
     def __init__(self):
         self.checker = ZeptoLocationChecker()
-        self.client = BrowserClient(proxy=HTTP_PROXY)
+        self.client = BrowserClient(**ZEPTO_BROWSER_SETTING)
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(ZEPTO_MAIN_URL))}")
@@ -239,7 +239,7 @@ class ZeptoResponseParser:
 class ZeptoBrowserScraper:
     def __init__(self, date_str: str = None):
         self.date_str = date_str
-        self.client = BrowserClient()
+        self.client = BrowserClient(**ZEPTO_BROWSER_SETTING)
         self.init_paths()
         self.init_resp_parser()
 
