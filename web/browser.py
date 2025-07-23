@@ -1,7 +1,16 @@
 from DrissionPage import Chromium, ChromiumOptions
-from DrissionPage._pages.chromium_tab import ChromiumTab
 from pyvirtualdisplay import Display
-from tclogger import logger
+from tclogger import logger, dict_to_str
+from typing import Union, TypedDict, Optional
+
+from configs.envs import CHROME_USER_DATA_DIR
+
+
+class BrowserSettingType(TypedDict):
+    uid: Optional[Union[int, str]]
+    port: Optional[Union[int, str]]
+    proxy: Optional[str]
+    use_virtual_display: Optional[bool]
 
 
 class BrowserClient:
@@ -23,9 +32,17 @@ class BrowserClient:
     ```
     """
 
-    def __init__(self, use_virtual_display: bool = False, proxy: str = None):
+    def __init__(
+        self,
+        uid: Union[int, str] = None,
+        port: Union[int, str] = None,
+        proxy: str = None,
+        use_virtual_display: bool = False,
+    ):
         self.use_virtual_display = use_virtual_display
         self.proxy = proxy
+        self.port = port
+        self.uid = uid
         self.is_using_virtual_display = False
         self.is_browser_opened = False
 
@@ -43,15 +60,28 @@ class BrowserClient:
     def open_browser(self):
         if self.is_browser_opened:
             return
+        logger.note("> Opening browser ...")
+        info_dict = {}
         chrome_options = ChromiumOptions()
+        if self.uid:
+            self.user_data_path = CHROME_USER_DATA_DIR / str(self.uid)
+            chrome_options.set_user_data_path(self.user_data_path)
+            info_dict["user_data_path"] = str(self.user_data_path)
+        if self.port:
+            chrome_options.set_local_port(self.port)
+            info_dict["port"] = self.port
         if self.proxy:
             chrome_options.set_proxy(self.proxy)
-        self.browser = Chromium(addr_or_opts=chrome_options)
+            info_dict["proxy"] = self.proxy
+        if info_dict:
+            logger.mesg(dict_to_str(info_dict), indent=2)
         self.chrome_options = chrome_options
+        self.browser = Chromium(addr_or_opts=self.chrome_options)
         self.is_browser_opened = True
 
     def close_browser(self):
         if hasattr(self, "browser") and self.is_browser_opened:
+            logger.note(f"> Closing browser ...")
             try:
                 self.browser.quit()
             except Exception as e:
