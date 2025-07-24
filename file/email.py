@@ -2,7 +2,7 @@ import argparse
 import sys
 
 from acto import Emailer, EmailConfigsType, EmailContentType
-from tclogger import logger, get_now_str
+from tclogger import logger, get_now_str, brk
 
 from configs.envs import DATA_ROOT, EMAIL_SENDER, EMAIL_RECVER
 
@@ -22,9 +22,16 @@ class EmailSender:
         self.init_paths()
         self.init_emailer()
 
+    def check_output(self):
+        if not self.output_merge_path.exists():
+            err_mesg = f"× Report .xlsx not found: {brk(self.output_merge_path)}"
+            logger.warn(err_mesg)
+            raise FileNotFoundError(err_mesg)
+
     def init_paths(self):
         self.output_root = DATA_ROOT / "output" / self.date_str
         self.output_merge_path = self.output_root / f"sku_{self.date_str}.xlsx"
+        self.check_output()
 
     def init_emailer(self):
         self.emailer = Emailer(
