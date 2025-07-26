@@ -33,6 +33,113 @@ def filename_to_url(filename: str) -> str:
     return urllib.parse.unquote(filename)
 
 
+class DmartLocationChecker:
+    def get_correct_address(self, location_idx: int) -> str:
+        return DMART_LOCATIONS[location_idx].get("locality", "")
+
+    def check_address(
+        self,
+        local_address: str,
+        correct_address: str,
+        extra_msg: str = "",
+        raise_error: bool = True,
+    ):
+        if not local_address:
+            return False
+        if correct_address.lower() not in local_address.lower():
+            err_mesg = f"\n  × {extra_msg}: incorrect location!"
+            logger.warn(err_mesg)
+            info_dict = {
+                "local_address": local_address,
+                "correct_address": correct_address,
+            }
+            logger.mesg(dict_to_str(info_dict), indent=4)
+            if raise_error:
+                raise ValueError(err_mesg)
+            return False
+        return True
+
+    def check_tab_location(
+        self, tab: ChromiumTab, location_idx: int, extra_msg: str = ""
+    ):
+        cookies = tab.cookies(all_info=True).as_dict()
+        guest_info = dict_get(cookies, "guest", None)
+        if not guest_info:
+            return False
+        try:
+            guest_info_str = urllib.parse.unquote(guest_info)
+            guest_info_dict = deserialize_str_to_json(guest_info_str)
+            tab_address = dict_get(guest_info_dict, "preferredPIN", "")
+            correct_address = self.get_correct_address(location_idx)
+            return self.check_address(
+                tab_address, correct_address, extra_msg, raise_error=False
+            )
+        except Exception as e:
+            logger.warn(e)
+            logger.mesg(guest_info)
+            return False
+
+    def check_product_location(
+        self, product_info: dict, location_idx: int, extra_msg: str = ""
+    ):
+        product_address = dict_get(product_info, "cookies.guest.preferredPIN", "")
+        correct_address = self.get_correct_address(location_idx)
+        return self.check_address(product_address, correct_address, extra_msg)
+
+
+class DmartLocationSwitcher:
+    def __init__(self):
+        self.checker = DmartLocationChecker()
+        self.client = BrowserClient(**DMART_BROWSER_SETTING)
+
+    def set_location(self, location_idx: int = 0) -> dict:
+        logger.note(f"> Visiting main page: {logstr.mesg(brk(DMART_MAIN_URL))}")
+        self.client.start_client()
+        tab = self.client.browser.latest_tab
+        tab.set.load_mode.none()
+
+        tab.get(DMART_MAIN_URL, timeout=30)
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
+
+        if self.checker.check_tab_location(
+            tab, location_idx, extra_msg="DmartLocationSwitcher"
+        ):
+            logger.okay("  * Location already correctly set. Skip.")
+        else:
+            logger.note(f"> Setting location:")
+            location_dict = DMART_LOCATIONS[location_idx]
+            location_name = location_dict.get("name", "")
+            location_text = location_dict.get("text", "")
+            logger.file(f"  * {location_name} ({location_text})")
+
+            sleep(3)
+            location_button = tab.ele(".^header_pincode")
+            logger.mesg(f"  * Click location button ...")
+            location_button.click()
+
+            sleep(1)
+            location_input = tab.ele("#pincodeInput")
+            sleep(1)
+            logger.mesg(f"  * Input target location text ...")
+            location_input.input(location_text)
+
+            sleep(2)
+            location_item = tab.ele(".^pincode-widget_pincode-item")
+            logger.mesg(f"  * Click most-related location suggestion ...")
+            location_item.click()
+
+            sleep(2)
+            confirm_region = tab.ele(".^pincode-widget_success-cntr-footer")
+            confirm_button = confirm_region.ele("xpath=//button")
+            logger.mesg(f"  * Click confirm button ...")
+            confirm_button.click()
+
+            sleep(3)
+
+        # self.client.close_other_tabs(create_new_tab=True)
+        self.client.stop_client(close_browser=False)
+
+
 class DmartResponseParser:
     def extract_resp(self, html: str) -> dict:
         soup = BeautifulSoup(html, "html.parser")

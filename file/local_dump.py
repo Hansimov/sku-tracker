@@ -4,7 +4,8 @@ from pathlib import Path
 from tclogger import logger, dict_get, match_val
 from typing import Literal
 
-from configs.envs import BLINKIT_LOCATIONS, SWIGGY_LOCATIONS, ZEPTO_LOCATIONS
+from configs.envs import BLINKIT_LOCATIONS, SWIGGY_LOCATIONS
+from configs.envs import ZEPTO_LOCATIONS, DMART_LOCATIONS
 from configs.envs import WEBSITE_LITERAL
 
 
@@ -12,11 +13,13 @@ WEBSITE_DUMP_ADDRESS_KEYS_DICT = {
     "blinkit": "cookies.gr_1_locality",
     "swiggy": "userLocation.address",
     "zepto": "local_storage.state.userPosition.shortAddress",
+    "dmart": "cookies.guest.preferredPIN",
 }
 WEBSITE_LOCATIONS_DICT = {
     "blinkit": BLINKIT_LOCATIONS,
     "swiggy": SWIGGY_LOCATIONS,
     "zepto": ZEPTO_LOCATIONS,
+    "dmart": DMART_LOCATIONS,
 }
 
 
