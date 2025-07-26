@@ -14,24 +14,6 @@ class BrowserSettingType(TypedDict):
 
 
 class BrowserClient:
-    """Install dependencies:
-    ```sh
-    sudo apt-get install xvfb xserver-xephyr tigervnc-standalone-server x11-utils gnumeric
-    pip install pyvirtualdisplay pillow EasyProcess pyautogui mss
-    ```
-
-    See: ponty/PyVirtualDisplay: Python wrapper for Xvfb, Xephyr and Xvnc
-    * https://github.com/ponty/PyVirtualDisplay
-
-    See also: [Bug]: Missing X server or $DISPLAY · Issue #8148 · puppeteer/puppeteer
-        * https://github.com/puppeteer/puppeteer/issues/8148
-
-    ```sh
-    # xdpyinfo -display :10.0
-    export DISPLAY=localhost:10.0
-    ```
-    """
-
     def __init__(
         self,
         uid: Union[int, str] = None,
