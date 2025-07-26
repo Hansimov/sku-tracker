@@ -47,6 +47,7 @@ export DISPLAY=localhost:11.0
 > [!NOTE]
 > [Bug]: Missing X server or $DISPLAY · Issue #8148 · puppeteer/puppeteer
 >   * https://github.com/puppeteer/puppeteer/issues/8148
+>   * https://github.com/puppeteer/puppeteer/issues/8148#issuecomment-3095573227
 
 ## Solution 2
 
@@ -65,3 +66,19 @@ This will start a virtual display on port `:99`, but it is invisible to user con
 > [!NOTE] 
 > ssh - Unable to open X display when trying to run google-chrome on Centos (Rhel 7.5) - Stack Overflow
 >   * https://stackoverflow.com/questions/60304251/unable-to-open-x-display-when-trying-to-run-google-chrome-on-centos-rhel-7-5
+
+
+## Solution 3
+
+```txt
+D-Bus connection was disconnected. Aborting.
+```
+
+```sh
+echo $DBUS_SESSION_BUS_ADDRESS
+# unix:path=/run/user/1000/bus
+```
+
+```sh
+export DBUS_SESSION_BUS_ADDRESS=none
+```
