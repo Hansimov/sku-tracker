@@ -42,6 +42,42 @@ def get_location_val(location: str) -> str:
     return LOCATION_MAP.get(location, location)
 
 
+def merge_dfs_horizontally(dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    """Merge all dfs into one df: concatenate columns"""
+    if not dfs:
+        return pd.DataFrame()
+    merged_df = dfs[0].copy()
+    for df in dfs[1:]:
+        for col in df.columns:
+            if col not in merged_df.columns:
+                merged_df[col] = df[col]
+            else:
+                # update each row with non-nan value
+                mask = merged_df[col].isna() | merged_df[col].eq("")
+                merged_df.loc[mask, col] = df.loc[mask, col]
+    return merged_df
+
+
+def merge_dfs_vertically(dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    """Merge all dfs into one df: concatenate rows"""
+    if not dfs:
+        return pd.DataFrame()
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df
+
+
+def merge_dfs(
+    dfs: list[pd.DataFrame],
+    direction: Literal["horizontal", "vertical"] = "horizontal",
+) -> pd.DataFrame:
+    if direction.lower().startswith("h"):
+        return merge_dfs_horizontally(dfs)
+    elif direction.lower().startswith("v"):
+        return merge_dfs_vertically(dfs)
+    else:
+        raise ValueError(f"Invalid merge direction: {direction}")
+
+
 class DataframeEditor:
     def remove_columns(
         self,
@@ -184,20 +220,6 @@ class ExcelMerger:
             df_list.append(df)
         return df_list
 
-    def merge_dfs(self, df_list: list[pd.DataFrame]) -> pd.DataFrame:
-        """Merge all dfs in df_list into one df, update each row with non-nan value"""
-        if not df_list:
-            return pd.DataFrame()
-        merged_df = df_list[0].copy()
-        for df in df_list[1:]:
-            for col in df.columns:
-                if col not in merged_df.columns:
-                    merged_df[col] = df[col]
-                else:
-                    mask = merged_df[col].isna() | merged_df[col].eq("")
-                    merged_df.loc[mask, col] = df.loc[mask, col]
-        return merged_df
-
     def set_sheet_styles(self, sheet: Worksheet):
         logger.note(f"> Setting sheet styles ...")
         # set discount columns number_format to percentage
@@ -233,7 +255,7 @@ class ExcelMerger:
             df_list = self.read_df_list_from_xlsx_files_with_same_location(
                 location_name
             )
-            merged_df = self.merge_dfs(df_list)
+            merged_df = merge_dfs(df_list, "horizontal")
             merged_df = self.editor.insert_discount_columns(merged_df)
             merged_df = self.editor.insert_date_and_location_columns(
                 merged_df, location_name, self.date_str
