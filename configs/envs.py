@@ -28,5 +28,5 @@ EMAIL_RECVER = SECRETS["email_recver"]
 SKU_XLSX = DATA_ROOT / SECRETS["sku_xlsx"]
 HTTP_PROXY = SECRETS["http_proxy"]
 
-WEBSITE_NAMES = ["blinkit", "zepto", "swiggy"]
-WEBSITE_LITERAL = Literal["blinkit", "zepto", "swiggy"]
+WEBSITE_NAMES = ["blinkit", "zepto", "swiggy", "dmart"]
+WEBSITE_LITERAL = Literal["blinkit", "zepto", "swiggy", "dmart"]

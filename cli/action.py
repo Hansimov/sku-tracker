@@ -9,7 +9,7 @@ from configs.envs import LOGS_ROOT, WEBSITE_NAMES, WEBSITE_LITERAL
 
 class ScrapeBatcherAction:
     def __init__(self, website: WEBSITE_LITERAL):
-        self.pattern = "****-**-** 12:30:00"
+        self.pattern = "****-**-** 13:00:00"
         log_name = f"action_scrape_batcher_{website}.log"
         self.perioder = Perioder(self.pattern, log_path=LOGS_ROOT / log_name)
         self.cmd_scrape = f"python -m web.{website}.batcher -s"
@@ -30,7 +30,7 @@ class ScrapeBatcherAction:
 
 class ExtractBatcherAction:
     def __init__(self):
-        self.pattern = "****-**-** 15:00:00"
+        self.pattern = "****-**-** 15:30:00"
         self.perioder = Perioder(
             self.pattern, log_path=LOGS_ROOT / f"action_extract_batcher.log"
         )
@@ -40,7 +40,7 @@ class ExtractBatcherAction:
             f"python -m web.{website}.batcher -e" for website in websites
         ]
         self.cmds_file = [
-            "python -m file.excel_merger",
+            "python -m file.excel_merger -m",
             "python -m file.email",
         ]
 
@@ -89,6 +89,7 @@ if __name__ == "__main__":
     # python -m cli.action -s -w blinkit
     # python -m cli.action -s -w swiggy
     # python -m cli.action -s -w zepto
+    # python -m cli.action -s -w dmart
 
     # Case 2: batcher action of extract, merge, and email
     # python -m cli.action -e

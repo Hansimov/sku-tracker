@@ -36,8 +36,18 @@ DISCOUNT_COLUMNS_MAP = {
         "price": "price_supersaver_zepto",
         "mrp": "mrp_zepto",
     },
+    "dmart": {
+        "disc": "Disc_Dmart",
+        "price": "price_dmart",
+        "mrp": "mrp_dmart",
+    },
 }
-EXCLUDE_COLUMNS = ["location_blinkit", "location_zepto", "location_instamart"]
+EXCLUDE_COLUMNS = [
+    "location_blinkit",
+    "location_zepto",
+    "location_instamart",
+    "location_dmart",
+]
 
 
 def get_location_val(location: str) -> str:
