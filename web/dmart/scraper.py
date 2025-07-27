@@ -244,10 +244,22 @@ class DmartProductDataExtractor:
 
         logger.note(f"  > Extracting product Data ...")
 
+        # get product_id
+        product_id = dict_get(info, "product_id", "")
+
+        # get location
+        location = self.addr_extractor.get_column_location(info)
+
         # get skus
         skus = dict_get(info, "resp.pdpData.dynamicPDP.data.productData.sKUs")
         if not skus:
-            return {}
+            logger.warn("  × No skus found in response data")
+            logger.exit_quiet(not self.verbose)
+            return {
+                "product_id": product_id,
+                "in_stock": "N/A",
+                "location": location,
+            }
 
         # get selected sku
         selected_prod = dict_get(info, "resp.selectedProd")
@@ -259,12 +271,11 @@ class DmartProductDataExtractor:
         if not sku:
             sku = skus[0]
 
-        # get product_id, product_name
-        product_id = dict_get(info, "product_id", "")
+        # get product_name
         product_name = dict_get(sku, "name", "")
 
         # get in_stock flag
-        in_stock_flag = "N/A"
+        in_stock_flag = 1
 
         # get price, mrp, unit
         price = dict_get(sku, "priceSALE", None)
@@ -276,9 +287,6 @@ class DmartProductDataExtractor:
             mrp = int(float(mrp))
 
         unit = dict_get(sku, "variantTextValue", "")
-
-        # get location
-        location = self.addr_extractor.get_column_location(info)
 
         product_data = {
             "product_name": product_name,
