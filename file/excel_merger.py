@@ -6,8 +6,10 @@ import warnings
 
 from openpyxl.worksheet.worksheet import Worksheet
 from pathlib import Path
-from tclogger import logger, logstr, brk, get_now_str, match_val
+from tclogger import logger, logstr, brk, match_val
+from tclogger import get_now, get_now_str, str_to_t
 from typing import Union, Literal
+from datetime import datetime, timedelta
 
 from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP, WEBSITE_NAMES
 
@@ -269,27 +271,129 @@ class ExcelMerger:
         logger.okay(f"  * {self.output_merge_path}")
 
 
+class ExcelPackager:
+    """Pack multiple Excel files (per week) from ExcelMerger (per day) into one file."""
+
+    def __init__(self, date_str: str = None, past_days: int = 7):
+        self.date_str = date_str or get_now_str()[:10]
+        self.past_days = past_days
+        self.init_dates()
+        self.init_package_path()
+        self.init_xlsx_paths()
+        self.init_workbook()
+
+    def init_dates(self) -> list[str]:
+        """Get past N days by date_str"""
+        start_date = str_to_t(self.date_str)
+        self.dates: list[datetime] = []
+        self.date_strs: list[str] = []
+        for i in range(self.past_days, 0, -1):
+            date = start_date - timedelta(days=i - 1)
+            date_str = date.strftime("%Y-%m-%d")
+            self.dates.append(date)
+            self.date_strs.append(date_str)
+        return self.date_strs
+
+    def init_package_path(self):
+        self.output_root = DATA_ROOT / "output"
+        self.package_root = DATA_ROOT / "package"
+        date_str_beg = self.date_strs[0].replace("-", "")
+        date_str_end = self.date_strs[-1].replace("-", "")
+        date_mark = f"{date_str_beg}_{date_str_end}"
+        date_week = self.dates[0].isocalendar().week
+        self.package_path = self.package_root / f"sku_ww{date_week}_{date_mark}.xlsx"
+
+    def init_xlsx_paths(self) -> list[Path]:
+        """Get all xlsx paths by date_strs"""
+        self.xlsx_paths = []
+        for date_str in self.date_strs:
+            xlsx_path = self.output_root / f"{date_str}" / f"sku_{date_str}.xlsx"
+            self.xlsx_paths.append(xlsx_path)
+        return self.xlsx_paths
+
+    def init_workbook(self):
+        self.workbook = openpyxl.Workbook()
+        if "Sheet" in self.workbook.sheetnames:
+            self.workbook.remove(self.workbook["Sheet"])
+
+    def read_df_from_xlsx(self, xlsx_path: Path) -> pd.DataFrame:
+        """Read all sheets from xlsx file and merge them into one DataFrame"""
+        xlsx = pd.ExcelFile(xlsx_path, engine="openpyxl")
+        df_list = []
+        for sheet_name in xlsx.sheet_names:
+            df = pd.read_excel(xlsx_path, sheet_name=sheet_name, engine="openpyxl")
+            df_list.append(df)
+        merge_df = merge_dfs(df_list, "vertical")
+        print(merge_df.tail())
+        return merge_df
+
+    def write_df_to_sheet(self, df: pd.DataFrame, date_str: str):
+        """Write dataframe to new sheet in workbook"""
+        sheet_name = f"{date_str}"
+        sheet = self.workbook.create_sheet(title=sheet_name)
+        # write headers
+        for col_idx, column in enumerate(df.columns, 1):
+            sheet.cell(row=1, column=col_idx, value=column)
+
+        # write data
+        for row_idx, (_, row) in enumerate(df.iterrows(), 2):
+            for col_idx, value in enumerate(row, 1):
+                sheet.cell(row=row_idx, column=col_idx, value=value)
+
+    def save_workbook(self):
+        logger.note(f"> Save packaged xlsx to:")
+        if not self.package_path.parent.exists():
+            self.package_path.parent.mkdir(parents=True, exist_ok=True)
+        self.workbook.save(self.package_path)
+        logger.okay(f"  * {self.package_path}")
+
+    def package(self):
+        logger.note(f"> Packaging xlsx files for:")
+        for date_str, xlsx_path in zip(self.date_strs, self.xlsx_paths):
+            if not xlsx_path.exists():
+                logger.warn(f"  × {xlsx_path}")
+                continue
+            logger.file(f"  * {xlsx_path}")
+            df = self.read_df_from_xlsx(xlsx_path)
+            self.write_df_to_sheet(df, date_str)
+        self.save_workbook()
+
+
 class ExcelMergerArgParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_argument("-d", "--date", type=str, default=None)
+        self.add_argument("-m", "--merge", action="store_true")
+        self.add_argument("-p", "--package", action="store_true")
 
     def parse_args(self):
         self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
         return self.args
 
 
+def main(args: argparse.Namespace):
+    if args.merge:
+        merger = ExcelMerger(date_str=args.date)
+        merger.merge()
+
+    if args.package:
+        packager = ExcelPackager(date_str=args.date)
+        packager.package()
+
+
 if __name__ == "__main__":
     arg_parser = ExcelMergerArgParser()
     args = arg_parser.parse_args()
 
-    merger = ExcelMerger(date_str=args.date)
-    merger.merge()
+    main(args)
 
     # Case 1: Extract data from websites and save to Excel files
     # python -m web.blinkit.batcher -e
     # python -m web.zepto.batcher -e
     # python -m web.swiggy.batcher -e
 
-    # Case 2: Merge all Excel files into one
-    # python -m file.excel_merger
+    # Case 2: Merge Excel files (daily) into one
+    # python -m file.excel_merger -m
+
+    # Case 3: Package Excel files (weekly) into one
+    # python -m file.excel_merger -p
