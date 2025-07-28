@@ -15,25 +15,31 @@ for arg in "$@"; do
     fi
 done
 
+# -s
 if [ "$is_scrape" = true ]; then
     # zepto must run first, as it uses proxy, and would close browser when finished
     python -m web.zepto.batcher -s
     python -m web.blinkit.batcher -s
+    python -m web.dmart.batcher -s
     # swiggy must run last, as it uses data of blinkit and zepto
     python -m web.swiggy.batcher -s
 fi
 
+# -e
 if [ "$is_extract" = true ]; then
     python -m web.zepto.batcher -e
     python -m web.blinkit.batcher -e
     python -m web.swiggy.batcher -e
+    python -m web.dmart.batcher -e
 fi
 
+# -x
 if [ "$is_postprocess" = true ]; then
     python -m file.excel_merger -m
     python -m file.email
 fi
 
+# -w
 if [ "$is_weekly" = true ]; then
     python -m file.excel_merger -p
     python -m file.email -c -t weekly

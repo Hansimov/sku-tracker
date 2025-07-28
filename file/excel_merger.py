@@ -401,6 +401,7 @@ if __name__ == "__main__":
     # python -m web.blinkit.batcher -e
     # python -m web.zepto.batcher -e
     # python -m web.swiggy.batcher -e
+    # python -m web.dmart.batcher -e
 
     # Case 2: Merge Excel files (daily) into one
     # python -m file.excel_merger -m

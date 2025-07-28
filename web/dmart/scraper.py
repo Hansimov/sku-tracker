@@ -265,7 +265,7 @@ class DmartProductDataExtractor:
         selected_prod = dict_get(info, "resp.selectedProd")
         sku = None
         for u in skus:
-            if dict_get(u, "skuUniqueId", "") == selected_prod:
+            if dict_get(u, "skuUniqueID", "") == selected_prod:
                 sku = u
                 break
         if not sku:

@@ -35,7 +35,7 @@ class ExtractBatcherAction:
             self.pattern, log_path=LOGS_ROOT / f"action_extract_batcher.log"
         )
         # swiggy must run last, as it uses data of blinkit and zepto
-        websites = ["blinkit", "zepto", "swiggy"]
+        websites = ["blinkit", "zepto", "swiggy", "dmart"]
         self.cmds_extract = [
             f"python -m web.{website}.batcher -e" for website in websites
         ]
