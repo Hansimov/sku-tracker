@@ -74,3 +74,24 @@ class LocalAddressExtractor:
             return False
         else:
             return True
+
+
+class SwiggyProductRespChecker:
+    def load_resp_from_dump_path(self, dump_path: Path) -> dict:
+        if not dump_path.exists():
+            return None
+        with open(dump_path, "r") as rf:
+            resp = json.load(rf)
+        return resp
+
+    def check_product_resp(self, resp: dict) -> bool:
+        item_data = dict_get(resp, "instamart.cachedProductItemData")
+        if not item_data:
+            return False
+        return True
+
+    def check(self, dump_path: Path) -> bool:
+        resp = self.load_resp_from_dump_path(dump_path)
+        if not resp:
+            return False
+        return self.check_product_resp(resp)

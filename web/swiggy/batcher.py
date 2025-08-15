@@ -17,7 +17,7 @@ from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 from web.blinkit.batcher import BlinkitExtractBatcher
 from web.zepto.batcher import ZeptoExtractBatcher
-from file.local_dump import LocalAddressExtractor
+from file.local_dump import LocalAddressExtractor, SwiggyProductRespChecker
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "swiggy"
@@ -45,6 +45,7 @@ class SwiggyScrapeBatcher:
         self.scraper = SwiggyBrowserScraper(date_str=date_str)
         self.extractor = SwiggyProductDataExtractor()
         self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
+        self.product_checker = SwiggyProductRespChecker()
         self.checker = SwiggyLocationChecker()
 
     def close_switcher(self):
@@ -70,7 +71,7 @@ class SwiggyScrapeBatcher:
             is_set_location = False
             for link_idx, link in enumerate(links):
                 if not link:
-                    logger.mesg(f"> Skip empty link at row [{link_idx}]")
+                    # logger.mesg(f"> Skip empty link at row [{link_idx}]")
                     continue
                 else:
                     logger.note(
@@ -80,14 +81,20 @@ class SwiggyScrapeBatcher:
                 product_id = link.split("/")[-1].strip()
                 dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
                 if self.skip_exists and dump_path.exists():
-                    if self.addr_extractor.check_dump_path_location(
+                    location_check = self.addr_extractor.check_dump_path_location(
                         dump_path, correct_location_name=location_name
-                    ):
-                        logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                    )
+                    product_check = self.product_checker.check(dump_path)
+                    if location_check and product_check:
+                        # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
                         continue
                     else:
                         logger.warn(f"> Remove local dump file, and re-scrape")
                         logger.file(f"  * {dump_path}")
+                        if not location_check:
+                            logger.warn(f"  × Incorrect location")
+                        if not product_check:
+                            logger.warn(f"  × Incorrect product info")
                         dump_path.unlink(missing_ok=True)
                 if not is_set_location:
                     logger.hint(f"> New Location: {location_name} ({location_text})")
@@ -127,12 +134,16 @@ class RefProductDataLoader:
             product_id = self.get_product_id(df, col_name=col_name, idx=idx)
             if not product_id:
                 continue
-            product_info, _ = batcher.load_product_info(
-                product_id=product_id, location_name=location_name
-            )
-            product_data = batcher.extractor.extract(product_info)
-            if product_data.get("mrp"):
-                break
+            try:
+                product_info, _ = batcher.load_product_info(
+                    product_id=product_id, location_name=location_name
+                )
+                product_data = batcher.extractor.extract(product_info)
+                if product_data.get("mrp"):
+                    break
+            except Exception as e:
+                logger.warn(e)
+                continue
         mrp = product_data.get("mrp", None)
         return mrp
 
@@ -200,9 +211,9 @@ class SwiggyExtractBatcher:
             for link_idx, link in enumerate(links):
                 product_bar.update(increment=1)
                 if not link:
-                    logger.mesg(
-                        f"  * Skip empty link at row [{link_idx}]", verbose=self.verbose
-                    )
+                    # logger.mesg(
+                    #     f"  * Skip empty link at row [{link_idx}]", verbose=self.verbose
+                    # )
                     row_dicts.append({})
                     continue
                 product_id = link.split("/")[-1].strip()
