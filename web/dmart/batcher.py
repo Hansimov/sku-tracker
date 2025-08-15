@@ -72,7 +72,7 @@ class DmartScrapeBatcher:
             is_set_location = False
             for link_idx, link in enumerate(links):
                 if not link:
-                    logger.mesg(f"> Skip empty link at row [{link_idx}]")
+                    # logger.mesg(f"> Skip empty link at row [{link_idx}]")
                     continue
                 else:
                     logger.note(
@@ -85,7 +85,7 @@ class DmartScrapeBatcher:
                     if self.addr_extractor.check_dump_path_location(
                         dump_path, correct_location_name=location_name
                     ):
-                        logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                        # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
                         continue
                     else:
                         logger.warn(f"> Remove local dump file, and re-scrape")

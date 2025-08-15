@@ -123,6 +123,7 @@ class ZeptoLocationSwitcher:
                 "xpath=//div[@data-testid='address-search-container']//div[1]"
             )
             logger.mesg(f"  * Click most-related location suggestion ...")
+            sleep(3)
             location_container.click()
 
             sleep(2)
@@ -130,6 +131,7 @@ class ZeptoLocationSwitcher:
                 "xpath=//button[@data-testid='location-confirm-btn']",
                 timeout=30,
             )
+            sleep(3)
             logger.mesg(f"  * Click confirm button ...")
             confirm_button.click()
 
