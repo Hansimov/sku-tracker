@@ -192,6 +192,13 @@ class ZeptoExtractBatcher:
                         f"    * zepto.{location_name}.{product_id}: "
                         f"{logstr.file(brk(product_info_path))}"
                     )
+                    # dump_path = self.get_dump_path(
+                    #     product_id=product_id, parent=location_name
+                    # )
+                    # dump_path.unlink(missing_ok=True)
+                    # logger.warn(f"> Remove dump file")
+                    # logger.file(f"  * {logstr.file(brk(dump_path))}")
+                    # continue
                     raise e
                 extracted_data = self.extractor.extract(product_info)
                 row_dicts.append(extracted_data)

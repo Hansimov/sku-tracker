@@ -30,7 +30,7 @@ In my case, `$DISPLAY` is set to `localhost:11.0` by default.
 And the solution is to resolve `$DISPLAY` environment correctly.
 
 
-## Solution 1
+### Solution 1
 
 ```sh
 # xdpyinfo -display :10.0
@@ -49,7 +49,7 @@ export DISPLAY=localhost:11.0
 >   * https://github.com/puppeteer/puppeteer/issues/8148
 >   * https://github.com/puppeteer/puppeteer/issues/8148#issuecomment-3095573227
 
-## Solution 2
+### Solution 2
 
 ```sh
 # sudo apt-get install -y xvfb
@@ -68,7 +68,7 @@ This will start a virtual display on port `:99`, but it is invisible to user con
 >   * https://stackoverflow.com/questions/60304251/unable-to-open-x-display-when-trying-to-run-google-chrome-on-centos-rhel-7-5
 
 
-## Solution 3
+### Solution 3
 
 ```txt
 D-Bus connection was disconnected. Aborting.
@@ -81,4 +81,48 @@ echo $DBUS_SESSION_BUS_ADDRESS
 
 ```sh
 export DBUS_SESSION_BUS_ADDRESS=none
+```
+
+
+## Commands
+
+Scrape items of different websites:
+
+```sh
+python -m web.zepto.batcher -s
+python -m web.blinkit.batcher -s
+python -m web.dmart.batcher -s
+python -m web.swiggy.batcher -s
+```
+
+Extract items of different websites:
+
+```sh
+python -m web.zepto.batcher -e
+python -m web.blinkit.batcher -e
+python -m web.dmart.batcher -e
+python -m web.swiggy.batcher -e
+```
+
+Scrape items of all websites:
+
+```sh
+./cli/run.sh -s
+```
+
+Extract items of all websites:
+```sh
+./cli/run.sh -e
+```
+
+Merge excels and email:
+
+```sh
+./cli/run.sh -x
+```
+
+Weekly summary and email:
+
+```sh
+./cli/run.sh -w
 ```
