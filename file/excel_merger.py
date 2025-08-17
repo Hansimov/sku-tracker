@@ -6,9 +6,11 @@ import warnings
 
 from openpyxl.worksheet.worksheet import Worksheet
 from pathlib import Path
-from tclogger import logger, logstr, brk, match_val, get_date_str
+from tclogger import logger, logstr, brk, match_val, get_date_str, str_to_t
+from tclogger import dict_to_str, dict_to_table_str
 from typing import Union, Literal
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP
 from configs.envs import SKIP_WEBSITE_CHECKS_MAP, WEBSITE_NAMES
@@ -66,7 +68,7 @@ WEBSITE_CHECK_COLUMNS_MAP = {
         "checks": ["instock_dmart"],
     },
 }
-SKIP_CHECK_COLUMNS_MAP = {"dmart": ...}
+CHECK_GROUP_KEYS = ["website", "location"]
 
 
 def get_location_val(location: str) -> str:
@@ -117,7 +119,7 @@ def log_df_tail(df: pd.DataFrame, n: int = 5):
 
 def log_df_dims(df: pd.DataFrame):
     row_cnt, col_cnt = df.shape
-    logger.mesg(f"* [{row_cnt} rows x {col_cnt} cols]")
+    logger.mesg(f"* [{logstr.file(row_cnt)} rows x {logstr.file(col_cnt)} cols]")
 
 
 def read_df_from_xlsx(xlsx_path: Path, verbose: bool = True) -> pd.DataFrame:
@@ -144,8 +146,9 @@ class DataframeEditor:
         logger.note(f"> Removing columns: {logstr.file(columns)}")
         if not inplace:
             df = df.copy()
+        df_columns = df.columns.tolist()
         for col in columns:
-            col_name, _, _ = match_val(col, df.columns.tolist(), use_fuzz=True)
+            col_name, _, _ = match_val(col, df_columns, use_fuzz=True)
             if col_name in df.columns:
                 df.drop(columns=col_name, inplace=True)
         return df
@@ -336,7 +339,62 @@ class ExcelChecker:
         self.root = DATA_ROOT / "output" / self.date_str
         self.xlsx_path = self.root / f"sku_{self.date_str}.xlsx"
 
-    def check(self, verbose: bool = True) -> dict:
+    def get_should_skip_check(
+        self,
+        website: str,
+        link_val: str,
+        df_columns: list[str],
+        row: pd.Series,
+    ) -> bool:
+        """skip specific conditions"""
+        # skip empty link
+        if pd.isna(link_val):
+            return True
+        # skip invalid cell value
+        if website in SKIP_WEBSITE_CHECKS_MAP.keys():
+            # if any skip_cond matches, skip check
+            # and in each skip_cond, all sub_skip_conds must match
+            should_skip_check = False
+            for skip_conds in SKIP_WEBSITE_CHECKS_MAP[website]:
+                should_skip_check = True
+                for skip_col, skip_val in skip_conds.items():
+                    skip_col_name, _, _ = match_val(skip_col, df_columns, use_fuzz=True)
+                    # if any sub_skip_cond not match,
+                    # break, and try to match next skip_cond
+                    if skip_val != row.get(skip_col_name, None):
+                        should_skip_check = False
+                        break
+                # meet one matched skip_cond, skip later sub_skip_conds
+                if should_skip_check:
+                    break
+            return should_skip_check
+        return False
+
+    def count_issues(self, issues: list[dict]) -> dict[tuple, int]:
+        group_res = defaultdict(list)
+        for issue in issues:
+            key = tuple(issue[k] for k in CHECK_GROUP_KEYS)
+            group_res[key].append(issue)
+        res = {k: len(v) for k, v in group_res.items()}
+        return res
+
+    def format_check_res(
+        self, res: list[dict], output_format: Literal["dict", "table"] = "table"
+    ) -> str:
+        count_res = self.count_issues(res)
+        if output_format == "table":
+            return dict_to_table_str(
+                count_res,
+                key_headers=CHECK_GROUP_KEYS,
+                val_headers=["Num"],
+                aligns=["r", "r", "r"],
+                sum_at_tail=True,
+                is_colored=False,
+            )
+        else:  # output_format == "dict":
+            return dict_to_str(count_res)
+
+    def check(self, verbose: bool = False) -> dict:
         """
         Example output:
         [
@@ -346,7 +404,7 @@ class ExcelChecker:
                 "link": "weblink_swiggy",
                 "column": "instock_swiggy",
                 "value": "N/A",
-                "idx": ...
+                "row": ...
             },
             ...
         ]
@@ -360,7 +418,7 @@ class ExcelChecker:
         df = read_df_from_xlsx(self.xlsx_path)
         df_columns = df.columns.tolist()
         issue_values = ["", "n/a", None]
-        for check_website, check_cols in WEBSITE_CHECK_COLUMNS_MAP.items():
+        for website, check_cols in WEBSITE_CHECK_COLUMNS_MAP.items():
             link_col_name, _, _ = match_val(
                 check_cols["link"], df_columns, use_fuzz=True
             )
@@ -368,52 +426,34 @@ class ExcelChecker:
             for check_col in check_cols["checks"]:
                 check_col_name, _, _ = match_val(check_col, df_columns, use_fuzz=True)
                 for row_idx, row in df.iterrows():
-                    # skip empty link
-                    link_val = row.get(link_col_name, "")
-                    if pd.isna(link_val):
+                    link_val = row.get(link_col_name, None)
+                    if self.get_should_skip_check(
+                        website=website,
+                        df_columns=df_columns,
+                        link_val=link_val,
+                        row=row,
+                    ):
                         continue
-
-                    # skip specific conditions
-                    if check_website in SKIP_WEBSITE_CHECKS_MAP.keys():
-                        # if any skip_cond matches, skip check
-                        # and in each skip_cond, all sub_skip_conds must match
-                        should_skip_check = False
-                        for skip_conds in SKIP_WEBSITE_CHECKS_MAP[check_website]:
-                            should_skip_check = True
-                            for skip_col, skip_val in skip_conds.items():
-                                skip_col_name, _, _ = match_val(
-                                    skip_col, df_columns, use_fuzz=True
-                                )
-                                # if any sub_skip_cond not match,
-                                # break, and try to match next skip_cond
-                                if skip_val != row.get(skip_col_name, None):
-                                    should_skip_check = False
-                                    break
-                            # meet one matched skip_cond, skip later sub_skip_conds
-                            if should_skip_check:
-                                break
-                        if should_skip_check:
-                            continue
-
                     cell_val = row.get(check_col_name, None)
                     if pd.isna(cell_val) or cell_val in issue_values:
                         issue_item = {
-                            "website": check_website,
+                            "website": website,
                             "location": row.get(location_col_name, ""),
-                            "link": row.get(link_col_name, ""),
+                            "link": link_val,
                             "column": check_col_name,
                             "value": cell_val,
-                            "idx": row_idx + 1,
+                            "row": row.get("#") + 1,
                         }
                         res.append(issue_item)
-        if verbose:
-            if not res:
-                logger.okay(f"✓ All items are good!")
-            else:
-                logger.warn(f"× {len(res)} issues found:")
+
+        if res:
+            logger.warn(f"× Issues found: {len(res)}")
+            if verbose:
                 for item in res:
                     logger.file(item, indent=2)
-                logger.warn(f"× {len(res)} issues found!")
+            logger.mesg(self.format_check_res(res))
+        else:
+            logger.okay(f"✓ All items are good!")
 
         return res
 
