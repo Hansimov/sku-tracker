@@ -4,10 +4,11 @@ import sys
 from acto import Emailer, EmailConfigsType, EmailContentType
 from datetime import timedelta
 from pathlib import Path
-from tclogger import logger, get_now_str, brk, str_to_t
+from tclogger import logger, get_now_str, brk, str_to_t, get_date_str
 from typing import Literal
 
 from configs.envs import DATA_ROOT, EMAIL_SENDER, EMAIL_RECVER
+from file.excel_merger import ExcelChecker
 
 
 class EmailSender:
@@ -20,7 +21,7 @@ class EmailSender:
         verbose: bool = True,
     ):
         self.configs = configs
-        self.date_str = date_str or get_now_str()[:10]
+        self.date_str = get_date_str(date_str)
         self.confirm_before_send = confirm_before_send
         self.task = task
         self.verbose = verbose
@@ -67,6 +68,7 @@ class EmailSender:
             confirm_before_send=self.confirm_before_send,
             verbose=self.verbose,
         )
+        self.checker = ExcelChecker(self.date_str)
 
     def create_subject_and_body(self):
         username = self.configs.get("username", "")
@@ -77,11 +79,15 @@ class EmailSender:
         else:
             subject_str = f"[SKU Daily Report] [{self.date_str}]"
 
+        check_res = self.checker.check()
+        check_res_str = self.checker.format_check_res(check_res)
+
         file_str = f"File: <b>{self.report_path.name}</b>"
+        issue_str = f"Issues: <br/><pre>{check_res_str}</pre>"
         from_str = f"From: <b>{username}</b>"
         sent_str = f"Sent: {get_now_str()}"
 
-        body_str = " <br/> ".join([file_str, from_str, sent_str])
+        body_str = " <br/> ".join([file_str, issue_str, from_str, sent_str])
 
         res = {
             "subject": subject_str,
