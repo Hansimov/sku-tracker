@@ -6,12 +6,12 @@ import warnings
 
 from openpyxl.worksheet.worksheet import Worksheet
 from pathlib import Path
-from tclogger import logger, logstr, brk, match_val
-from tclogger import get_now, get_now_str, str_to_t
+from tclogger import logger, logstr, brk, match_val, get_date_str
 from typing import Union, Literal
 from datetime import datetime, timedelta
 
-from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP, WEBSITE_NAMES
+from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP
+from configs.envs import SKIP_WEBSITE_CHECKS_MAP, WEBSITE_NAMES
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -48,6 +48,25 @@ EXCLUDE_COLUMNS = [
     "location_instamart",
     "location_dmart",
 ]
+WEBSITE_CHECK_COLUMNS_MAP = {
+    "blinkit": {
+        "link": "weblink_blinkit",
+        "checks": ["instock_blinkit"],
+    },
+    "zepto": {
+        "link": "weblink_zepto",
+        "checks": ["instock_zepto"],
+    },
+    "swiggy": {
+        "link": "weblink_instamart",
+        "checks": ["instock_instamart"],
+    },
+    "dmart": {
+        "link": "weblink_dmart",
+        "checks": ["instock_dmart"],
+    },
+}
+SKIP_CHECK_COLUMNS_MAP = {"dmart": ...}
 
 
 def get_location_val(location: str) -> str:
@@ -88,6 +107,31 @@ def merge_dfs(
         return merge_dfs_vertically(dfs)
     else:
         raise ValueError(f"Invalid merge direction: {direction}")
+
+
+def log_df_tail(df: pd.DataFrame, n: int = 5):
+    logger.mesg(f"> DataFrame tail {n} rows:")
+    with pd.option_context("display.show_dimensions", False):
+        logger.line(df.tail(n), indent=2)
+
+
+def log_df_dims(df: pd.DataFrame):
+    row_cnt, col_cnt = df.shape
+    logger.mesg(f"* [{row_cnt} rows x {col_cnt} cols]")
+
+
+def read_df_from_xlsx(xlsx_path: Path, verbose: bool = True) -> pd.DataFrame:
+    """Read all sheets from xlsx file and merge them into one DataFrame"""
+    xlsx = pd.ExcelFile(xlsx_path, engine="openpyxl")
+    df_list = []
+    for sheet_name in xlsx.sheet_names:
+        df = pd.read_excel(xlsx_path, sheet_name=sheet_name, engine="openpyxl")
+        df_list.append(df)
+    merge_df = merge_dfs(df_list, "vertical")
+    if verbose:
+        log_df_tail(merge_df)
+        log_df_dims(merge_df)
+    return merge_df
 
 
 class DataframeEditor:
@@ -184,7 +228,7 @@ class DataframeEditor:
 
 class ExcelMerger:
     def __init__(self, date_str: str = None):
-        self.date_str = date_str or get_now_str()[:10]
+        self.date_str = get_date_str(date_str)
         self.editor = DataframeEditor()
         self.init_paths()
         self.init_workbook()
@@ -281,11 +325,104 @@ class ExcelMerger:
         logger.okay(f"  * {self.output_merge_path}")
 
 
+class ExcelChecker:
+    """Check rows in Excel file (per day) for missing or invalid data."""
+
+    def __init__(self, date_str: str = None):
+        self.date_str = get_date_str(date_str)
+        self.init_paths()
+
+    def init_paths(self):
+        self.root = DATA_ROOT / "output" / self.date_str
+        self.xlsx_path = self.root / f"sku_{self.date_str}.xlsx"
+
+    def check(self, verbose: bool = True) -> dict:
+        """
+        Example output:
+        [
+            {
+                "website": "swiggy",
+                "location": "...",
+                "link": "weblink_swiggy",
+                "column": "instock_swiggy",
+                "value": "N/A",
+                "idx": ...
+            },
+            ...
+        ]
+        """
+        logger.note(f"> Checking xlsx file:")
+        logger.file(f"  * {self.xlsx_path}")
+        if not self.xlsx_path.exists():
+            logger.warn(f"  × Excel does not exist!")
+            return False
+        res = []
+        df = read_df_from_xlsx(self.xlsx_path)
+        df_columns = df.columns.tolist()
+        issue_values = ["", "n/a", None]
+        for check_website, check_cols in WEBSITE_CHECK_COLUMNS_MAP.items():
+            link_col_name, _, _ = match_val(
+                check_cols["link"], df_columns, use_fuzz=True
+            )
+            location_col_name, _, _ = match_val("location", df_columns, use_fuzz=True)
+            for check_col in check_cols["checks"]:
+                check_col_name, _, _ = match_val(check_col, df_columns, use_fuzz=True)
+                for row_idx, row in df.iterrows():
+                    # skip empty link
+                    link_val = row.get(link_col_name, "")
+                    if pd.isna(link_val):
+                        continue
+
+                    # skip specific conditions
+                    if check_website in SKIP_WEBSITE_CHECKS_MAP.keys():
+                        # if any skip_cond matches, skip check
+                        # and in each skip_cond, all sub_skip_conds must match
+                        should_skip_check = False
+                        for skip_conds in SKIP_WEBSITE_CHECKS_MAP[check_website]:
+                            should_skip_check = True
+                            for skip_col, skip_val in skip_conds.items():
+                                skip_col_name, _, _ = match_val(
+                                    skip_col, df_columns, use_fuzz=True
+                                )
+                                # if any sub_skip_cond not match,
+                                # break, and try to match next skip_cond
+                                if skip_val != row.get(skip_col_name, None):
+                                    should_skip_check = False
+                                    break
+                            # meet one matched skip_cond, skip later sub_skip_conds
+                            if should_skip_check:
+                                break
+                        if should_skip_check:
+                            continue
+
+                    cell_val = row.get(check_col_name, None)
+                    if pd.isna(cell_val) or cell_val in issue_values:
+                        issue_item = {
+                            "website": check_website,
+                            "location": row.get(location_col_name, ""),
+                            "link": row.get(link_col_name, ""),
+                            "column": check_col_name,
+                            "value": cell_val,
+                            "idx": row_idx + 1,
+                        }
+                        res.append(issue_item)
+        if verbose:
+            if not res:
+                logger.okay(f"✓ All items are good!")
+            else:
+                logger.warn(f"× {len(res)} issues found:")
+                for item in res:
+                    logger.file(item, indent=2)
+                logger.warn(f"× {len(res)} issues found!")
+
+        return res
+
+
 class ExcelPackager:
     """Pack multiple Excel files (per week) from ExcelMerger (per day) into one file."""
 
     def __init__(self, date_str: str = None, past_days: int = 7):
-        self.date_str = date_str or get_now_str()[:10]
+        self.date_str = get_date_str(date_str)
         self.past_days = past_days
         self.init_dates()
         self.init_package_path()
@@ -326,17 +463,6 @@ class ExcelPackager:
         if "Sheet" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Sheet"])
 
-    def read_df_from_xlsx(self, xlsx_path: Path) -> pd.DataFrame:
-        """Read all sheets from xlsx file and merge them into one DataFrame"""
-        xlsx = pd.ExcelFile(xlsx_path, engine="openpyxl")
-        df_list = []
-        for sheet_name in xlsx.sheet_names:
-            df = pd.read_excel(xlsx_path, sheet_name=sheet_name, engine="openpyxl")
-            df_list.append(df)
-        merge_df = merge_dfs(df_list, "vertical")
-        print(merge_df.tail())
-        return merge_df
-
     def write_df_to_sheet(self, df: pd.DataFrame, date_str: str):
         """Write dataframe to new sheet in workbook"""
         sheet_name = f"{date_str}"
@@ -364,7 +490,7 @@ class ExcelPackager:
                 logger.warn(f"  × {xlsx_path}")
                 continue
             logger.file(f"  * {xlsx_path}")
-            df = self.read_df_from_xlsx(xlsx_path)
+            df = read_df_from_xlsx(xlsx_path)
             self.write_df_to_sheet(df, date_str)
         self.save_workbook()
 
@@ -374,6 +500,7 @@ class ExcelMergerArgParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.add_argument("-d", "--date", type=str, default=None)
         self.add_argument("-m", "--merge", action="store_true")
+        self.add_argument("-k", "--check", action="store_true")
         self.add_argument("-p", "--package", action="store_true")
 
     def parse_args(self):
@@ -385,6 +512,10 @@ def main(args: argparse.Namespace):
     if args.merge:
         merger = ExcelMerger(date_str=args.date)
         merger.merge()
+
+    if args.check:
+        checker = ExcelChecker(date_str=args.date)
+        checker.check()
 
     if args.package:
         packager = ExcelPackager(date_str=args.date)
@@ -406,5 +537,8 @@ if __name__ == "__main__":
     # Case 2: Merge Excel files (daily) into one
     # python -m file.excel_merger -m
 
-    # Case 3: Package Excel files (weekly) into one
+    # Case 3: Check Excel files (daily) for missing or invalid data
+    # python -m file.excel_merger -k
+
+    # Case 4: Package Excel files (weekly) into one
     # python -m file.excel_merger -p
