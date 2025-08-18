@@ -1,4 +1,5 @@
 import argparse
+import json
 import pandas as pd
 import openpyxl
 import sys
@@ -338,6 +339,7 @@ class ExcelChecker:
     def init_paths(self):
         self.root = DATA_ROOT / "output" / self.date_str
         self.xlsx_path = self.root / f"sku_{self.date_str}.xlsx"
+        self.log_path = self.xlsx_path.with_suffix(".log")
 
     def get_should_skip_check(
         self,
@@ -370,12 +372,20 @@ class ExcelChecker:
             return should_skip_check
         return False
 
-    def count_issues(self, issues: list[dict]) -> dict[tuple, int]:
+    def count_issues(
+        self, issues: list[dict], res_format: Literal["dict", "list"] = "dict"
+    ) -> Union[dict[tuple, int], list[dict]]:
         group_res = defaultdict(list)
         for issue in issues:
             key = tuple(issue[k] for k in CHECK_GROUP_KEYS)
             group_res[key].append(issue)
-        res = {k: len(v) for k, v in group_res.items()}
+        if res_format == "list":
+            res = [
+                dict(zip(CHECK_GROUP_KEYS, k)) | {"num": len(v)}
+                for k, v in group_res.items()
+            ]
+        else:
+            res = {k: len(v) for k, v in group_res.items()}
         return res
 
     def format_check_res(
@@ -394,6 +404,26 @@ class ExcelChecker:
         else:  # output_format == "dict":
             return dict_to_str(count_res)
 
+    def dump_check_res(self, res: list[dict]):
+        logger.note(f"> Dump checks log:")
+        if not res:
+            log_res = {
+                "counts": {},
+                "issues": [],
+            }
+        else:
+            count_res = self.count_issues(res, res_format="list")
+            log_res = {
+                "counts": count_res,
+                "issues": res,
+            }
+
+        if not self.log_path.parent.exists():
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.log_path, "w") as wf:
+            json.dump(log_res, wf, indent=4, ensure_ascii=False)
+        logger.file(f"  * {self.log_path}")
+
     def check(self, verbose: bool = False) -> dict:
         """
         Example output:
@@ -401,6 +431,7 @@ class ExcelChecker:
             {
                 "website": "swiggy",
                 "location": "...",
+                "date": ...,
                 "link": "weblink_swiggy",
                 "column": "instock_swiggy",
                 "value": "N/A",
@@ -417,12 +448,13 @@ class ExcelChecker:
         res = []
         df = read_df_from_xlsx(self.xlsx_path)
         df_columns = df.columns.tolist()
+        location_col_name, _, _ = match_val("location", df_columns, use_fuzz=True)
+        date_col_name, _, _ = match_val("date", df_columns, use_fuzz=True)
         issue_values = ["", "n/a", None]
         for website, check_cols in WEBSITE_CHECK_COLUMNS_MAP.items():
             link_col_name, _, _ = match_val(
                 check_cols["link"], df_columns, use_fuzz=True
             )
-            location_col_name, _, _ = match_val("location", df_columns, use_fuzz=True)
             for check_col in check_cols["checks"]:
                 check_col_name, _, _ = match_val(check_col, df_columns, use_fuzz=True)
                 for row_idx, row in df.iterrows():
@@ -439,6 +471,7 @@ class ExcelChecker:
                         issue_item = {
                             "website": website,
                             "location": row.get(location_col_name, ""),
+                            "date": row.get(date_col_name, ""),
                             "link": link_val,
                             "column": check_col_name,
                             "value": cell_val,
@@ -451,9 +484,11 @@ class ExcelChecker:
             if verbose:
                 for item in res:
                     logger.file(item, indent=2)
-            logger.mesg(self.format_check_res(res))
+            logger.mesg(self.format_check_res(res), indent=2)
         else:
             logger.okay(f"✓ All items are good!")
+
+        self.dump_check_res(res)
 
         return res
 
