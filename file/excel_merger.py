@@ -15,6 +15,7 @@ from collections import defaultdict
 
 from configs.envs import DATA_ROOT, LOCATION_LIST, LOCATION_MAP
 from configs.envs import SKIP_WEBSITE_CHECKS_MAP, WEBSITE_NAMES
+from web.logs import log_df_tail, log_df_dims
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -110,17 +111,6 @@ def merge_dfs(
         return merge_dfs_vertically(dfs)
     else:
         raise ValueError(f"Invalid merge direction: {direction}")
-
-
-def log_df_tail(df: pd.DataFrame, n: int = 5):
-    logger.mesg(f"> DataFrame tail {n} rows:")
-    with pd.option_context("display.show_dimensions", False):
-        logger.line(df.tail(n), indent=2)
-
-
-def log_df_dims(df: pd.DataFrame):
-    row_cnt, col_cnt = df.shape
-    logger.mesg(f"* [{logstr.file(row_cnt)} rows x {logstr.file(col_cnt)} cols]")
 
 
 def read_df_from_xlsx(xlsx_path: Path, verbose: bool = True) -> pd.DataFrame:
