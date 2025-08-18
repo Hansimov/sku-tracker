@@ -17,6 +17,7 @@ from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 from web.blinkit.batcher import BlinkitExtractBatcher
 from web.zepto.batcher import ZeptoExtractBatcher
+from web.logs import log_link_idx
 from file.local_dump import LocalAddressExtractor, SwiggyProductRespChecker
 from cli.arg import BatcherArgParser
 
@@ -69,44 +70,52 @@ class SwiggyScrapeBatcher:
             location_text = location_item.get("text", "")
             links = swiggy_links[:]
             is_set_location = False
-            for link_idx, link in enumerate(links):
-                if not link:
-                    # logger.mesg(f"> Skip empty link at row [{link_idx}]")
-                    continue
-                else:
-                    logger.note(
-                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(len(links))}]",
-                        end=" ",
-                    )
-                product_id = link.split("/")[-1].strip()
-                dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
-                if self.skip_exists and dump_path.exists():
-                    location_check = self.addr_extractor.check_dump_path_location(
-                        dump_path, correct_location_name=location_name
-                    )
-                    product_check = self.product_checker.check(dump_path)
-                    if location_check and product_check:
-                        # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+            # multiple runs to scan and recover missing products
+            for i in range(3):
+                for link_idx, link in enumerate(links):
+                    is_log_link_idx = False
+                    if not link:
+                        # logger.mesg(f"> Skip empty link at row [{link_idx}]")
                         continue
-                    else:
-                        logger.warn(f"> Remove local dump file, and re-scrape")
-                        logger.file(f"  * {dump_path}")
-                        if not location_check:
-                            logger.warn(f"  × Incorrect location")
-                        if not product_check:
-                            logger.warn(f"  × Incorrect product info")
-                        dump_path.unlink(missing_ok=True)
-                if not is_set_location:
-                    logger.hint(f"> New Location: {location_name} ({location_text})")
-                    self.switcher.set_location(location_idx)
-                    is_set_location = True
-                product_info = self.scraper.run(product_id, parent=location_name)
-                self.checker.check_product_location(
-                    product_info, location_idx, extra_msg="SwiggyScrapeBatcher"
-                )
-                extracted_data = self.extractor.extract(product_info)
-                if extracted_data:
-                    sleep(3)
+                    product_id = link.split("/")[-1].strip()
+                    dump_path = self.scraper.get_dump_path(
+                        product_id, parent=location_name
+                    )
+                    if self.skip_exists and dump_path.exists():
+                        location_check = self.addr_extractor.check_dump_path_location(
+                            dump_path, correct_location_name=location_name
+                        )
+                        product_check = self.product_checker.check(dump_path)
+                        if location_check and product_check:
+                            # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                            continue
+                        else:
+                            if not is_log_link_idx:
+                                log_link_idx(link_idx, len(links))
+                                is_log_link_idx = True
+                            logger.file(f"  * {dump_path}")
+                            if not location_check:
+                                logger.warn(f"  × Incorrect location")
+                            if not product_check:
+                                logger.warn(f"  × Incorrect product info")
+                            logger.warn(f"  * Remove local dump file, and re-scrape")
+                            dump_path.unlink(missing_ok=True)
+                    if not is_set_location:
+                        logger.hint(
+                            f"> New Location: {location_name} ({location_text})"
+                        )
+                        self.switcher.set_location(location_idx)
+                        is_set_location = True
+                    if not is_log_link_idx:
+                        log_link_idx(link_idx, len(links))
+                        is_log_link_idx = True
+                    product_info = self.scraper.run(product_id, parent=location_name)
+                    self.checker.check_product_location(
+                        product_info, location_idx, extra_msg="SwiggyScrapeBatcher"
+                    )
+                    extracted_data = self.extractor.extract(product_info)
+                    if extracted_data:
+                        sleep(3)
 
         self.close_scraper()
 
@@ -257,9 +266,7 @@ def run_scrape_batcher(args: argparse.Namespace):
             date_str=args.date,
             close_browser_after_done=args.close_browser_after_done,
         )
-        # multiple runs to scan and recover missing products
-        for i in range(3):
-            scraper_batcher.run()
+        scraper_batcher.run()
     except Exception as e:
         logger.warn(e)
         logger.warn(f"> Closing tabs ...")
