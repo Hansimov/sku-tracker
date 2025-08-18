@@ -23,6 +23,14 @@ WEBSITE_LOCATIONS_DICT = {
 }
 
 
+def load_resp_from_dump_path(dump_path: Path) -> dict:
+    if not dump_path.exists():
+        return None
+    with open(dump_path, "r") as rf:
+        resp = json.load(rf)
+    return resp
+
+
 class LocalAddressExtractor:
     def __init__(self, website_name: WEBSITE_LITERAL):
         self.website_name = website_name
@@ -54,15 +62,8 @@ class LocalAddressExtractor:
         location_name = self.map_dump_address_to_location_name(dump_address)
         return location_name
 
-    def load_resp_from_dump_path(self, dump_path: Path) -> dict:
-        if not dump_path.exists():
-            return None
-        with open(dump_path, "r") as rf:
-            resp = json.load(rf)
-        return resp
-
     def check_dump_path_location(self, dump_path: Path, correct_location_name: str):
-        resp = self.load_resp_from_dump_path(dump_path)
+        resp = load_resp_from_dump_path(dump_path)
         if not resp:
             logger.warn(f"× No data of dump_path: {dump_path}")
             return False
@@ -77,13 +78,6 @@ class LocalAddressExtractor:
 
 
 class SwiggyProductRespChecker:
-    def load_resp_from_dump_path(self, dump_path: Path) -> dict:
-        if not dump_path.exists():
-            return None
-        with open(dump_path, "r") as rf:
-            resp = json.load(rf)
-        return resp
-
     def check_product_resp(self, resp: dict) -> bool:
         item_data = dict_get(resp, "instamart.cachedProductItemData")
         if not item_data:
@@ -91,7 +85,21 @@ class SwiggyProductRespChecker:
         return True
 
     def check(self, dump_path: Path) -> bool:
-        resp = self.load_resp_from_dump_path(dump_path)
+        resp = load_resp_from_dump_path(dump_path)
+        if not resp:
+            return False
+        return self.check_product_resp(resp)
+
+
+class DmartProductRespChecker:
+    def check_product_resp(self, resp: dict) -> bool:
+        item_data = dict_get(resp, "resp.pdpData.dynamicPDP.data.productData")
+        if not item_data:
+            return False
+        return True
+
+    def check(self, dump_path: Path) -> bool:
+        resp = load_resp_from_dump_path(dump_path)
         if not resp:
             return False
         return self.check_product_resp(resp)
