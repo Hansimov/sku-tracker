@@ -35,7 +35,7 @@ fi
 
 # -x
 if [ "$is_postprocess" = true ]; then
-    python -m file.excel_merger -m
+    python -m file.excel_merger -m -k
     python -m file.email
 fi
 

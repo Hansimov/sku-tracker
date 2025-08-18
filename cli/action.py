@@ -30,7 +30,7 @@ class ScrapeBatcherAction:
 
 class ExtractBatcherAction:
     def __init__(self):
-        self.pattern = "****-**-** 15:30:00"
+        self.pattern = "****-**-** 16:00:00"
         self.perioder = Perioder(
             self.pattern, log_path=LOGS_ROOT / f"action_extract_batcher.log"
         )
@@ -40,7 +40,7 @@ class ExtractBatcherAction:
             f"python -m web.{website}.batcher -e" for website in websites
         ]
         self.cmds_file = [
-            "python -m file.excel_merger -m",
+            "python -m file.excel_merger -m -k",
             "python -m file.email",
         ]
 
