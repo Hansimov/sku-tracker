@@ -83,11 +83,12 @@ class EmailSender:
         check_res_str = self.checker.format_check_res(check_res)
 
         file_str = f"File: <b>{self.report_path.name}</b>"
-        issue_str = f"Issues: <br/><pre>{check_res_str}</pre>"
         from_str = f"From: <b>{username}</b>"
         sent_str = f"Sent: {get_now_str()}"
+        logs_str = f"Logs: <b>{self.checker.log_path.name}</b>"
+        issue_str = f"Issues: <br/><pre>{check_res_str}</pre>"
 
-        body_str = " <br/> ".join([file_str, issue_str, from_str, sent_str])
+        body_str = " <br/> ".join([file_str, from_str, sent_str, logs_str, issue_str])
 
         res = {
             "subject": subject_str,
@@ -101,7 +102,7 @@ class EmailSender:
             "to": EMAIL_RECVER["to"],
             "cc": EMAIL_RECVER["cc"],
             **subject_and_body,
-            "attachments": self.report_path,
+            "attachments": [self.report_path, self.checker.log_path],
         }
         self.emailer.send(content)
 

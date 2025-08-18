@@ -257,7 +257,9 @@ def run_scrape_batcher(args: argparse.Namespace):
             date_str=args.date,
             close_browser_after_done=args.close_browser_after_done,
         )
-        scraper_batcher.run()
+        # multiple runs to scan and recover missing products
+        for i in range(3):
+            scraper_batcher.run()
     except Exception as e:
         logger.warn(e)
         logger.warn(f"> Closing tabs ...")
