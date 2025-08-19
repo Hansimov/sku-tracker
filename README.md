@@ -126,3 +126,15 @@ Weekly summary and email:
 ```sh
 ./cli/run.sh -w
 ```
+
+
+## Actions
+
+```sh
+python -m cli.action -s -w blinkit
+python -m cli.action -s -w zepto
+python -m cli.action -s -w swiggy
+python -m cli.action -s -w dmart
+
+python -m cli.action -e
+```
