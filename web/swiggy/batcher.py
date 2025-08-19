@@ -1,7 +1,6 @@
 import argparse
 import json
 import pandas as pd
-import shutil
 
 from acto import Retrier
 from copy import deepcopy
@@ -17,8 +16,9 @@ from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
 from web.swiggy.scraper import SwiggyBrowserScraper, SwiggyProductDataExtractor
 from web.blinkit.batcher import BlinkitExtractBatcher
 from web.zepto.batcher import ZeptoExtractBatcher
-from web.logs import log_link_idx
+from web.logs import log_link_idx, log_traceback
 from file.local_dump import LocalAddressExtractor, SwiggyProductRespChecker
+from file.record import LinksRecorder
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "swiggy"
@@ -48,6 +48,7 @@ class SwiggyScrapeBatcher:
         self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
         self.product_checker = SwiggyProductRespChecker()
         self.checker = SwiggyLocationChecker()
+        self.recorder = LinksRecorder(website=WEBSITE_NAME, date_str=date_str)
 
     def close_switcher(self):
         try:
@@ -77,6 +78,18 @@ class SwiggyScrapeBatcher:
                     if not link:
                         # logger.mesg(f"> Skip empty link at row [{link_idx}]")
                         continue
+
+                    record_params = {
+                        "website": WEBSITE_NAME,
+                        "location": location_name,
+                        "link": link,
+                    }
+                    if not self.recorder.is_record_good(**record_params, max_count=3):
+                        logger.warn(
+                            f"* Skip link for too many error times: {logstr.file(link)}"
+                        )
+                        continue
+
                     product_id = link.split("/")[-1].strip()
                     dump_path = self.scraper.get_dump_path(
                         product_id, parent=location_name
@@ -99,6 +112,7 @@ class SwiggyScrapeBatcher:
                             if not product_check:
                                 logger.warn(f"  × Incorrect product info")
                             logger.warn(f"  * Remove local dump file, and re-scrape")
+                            self.recorder.update_record(**record_params)
                             dump_path.unlink(missing_ok=True)
                     if not is_set_location:
                         logger.hint(
@@ -268,7 +282,7 @@ def run_scrape_batcher(args: argparse.Namespace):
         )
         scraper_batcher.run()
     except Exception as e:
-        logger.warn(e)
+        log_traceback(e)
         logger.warn(f"> Closing tabs ...")
         sleep(5)
         scraper_batcher.close_scraper()
