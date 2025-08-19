@@ -72,7 +72,7 @@ class SwiggyScrapeBatcher:
             links = swiggy_links[:]
             is_set_location = False
             # multiple runs to scan and recover missing products
-            for i in range(3):
+            for loop_idx in range(3):
                 for link_idx, link in enumerate(links):
                     is_log_link_idx = False
                     if not link:
@@ -85,9 +85,10 @@ class SwiggyScrapeBatcher:
                         "link": link,
                     }
                     if not self.recorder.is_record_good(**record_params, max_count=3):
-                        logger.warn(
-                            f"* Skip link for too many error times: {logstr.file(link)}"
-                        )
+                        if loop_idx == 0:
+                            logger.warn(
+                                f"* Skip link for too many error times: {logstr.file(link)}"
+                            )
                         continue
 
                     product_id = link.split("/")[-1].strip()
@@ -215,7 +216,7 @@ class SwiggyExtractBatcher:
                 product_info = json.load(rf)
         except Exception as e:
             logger.warn(f"  × File not found: {brk(logstr.file(product_info_path))}")
-            raise e
+            # raise e
         logger.exit_quiet(not self.verbose)
         return product_info, product_info_path
 

@@ -143,7 +143,7 @@ class BlinkitExtractBatcher:
                 product_info = json.load(rf)
         except Exception as e:
             logger.warn(f"  × File not found: {brk(logstr.file(product_info_path))}")
-            raise e
+            # raise e
         logger.exit_quiet(not self.verbose)
         return product_info, product_info_path
 
