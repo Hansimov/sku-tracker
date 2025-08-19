@@ -1,4 +1,5 @@
 import pandas as pd
+import traceback
 
 from tclogger import logger, logstr
 
@@ -19,3 +20,8 @@ def log_df_tail(df: pd.DataFrame, n: int = 5):
 def log_df_dims(df: pd.DataFrame):
     row_cnt, col_cnt = df.shape
     logger.mesg(f"* [{logstr.file(row_cnt)} rows x {logstr.file(col_cnt)} cols]")
+
+
+def log_traceback(e: Exception):
+    # logger.err(traceback.format_exc())
+    logger.warn(e)

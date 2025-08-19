@@ -49,7 +49,10 @@ class LocalAddressExtractor:
 
     def map_dump_address_to_location_name(self, dump_address: str) -> str:
         _, closest_idx, _ = match_val(dump_address, self.dump_addresses, use_fuzz=True)
-        location_name = self.locations[closest_idx].get("name", "")
+        if closest_idx is None:
+            location_name = None
+        else:
+            location_name = self.locations[closest_idx].get("name", "")
         return location_name
 
     def get_column_location(self, resp: dict) -> str:
