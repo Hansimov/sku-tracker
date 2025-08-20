@@ -30,7 +30,7 @@ class ScrapeBatcherAction:
 
 class ExtractBatcherAction:
     def __init__(self):
-        self.pattern = "****-**-** 16:00:00"
+        self.pattern = "****-**-** 16:30:00"
         self.perioder = Perioder(
             self.pattern, log_path=LOGS_ROOT / f"action_extract_batcher.log"
         )

@@ -29,6 +29,12 @@ class ZeptoLocationChecker:
     def get_correct_address(self, location_idx: int) -> str:
         return ZEPTO_LOCATIONS[location_idx].get("locality", "")
 
+    def is_local_match_correct(self, local_address: str, correct_address: str) -> bool:
+        correct_parts = correct_address.split(",")
+        return all(
+            part.lower().strip() in local_address.lower() for part in correct_parts
+        )
+
     def check_address(
         self,
         local_address: str,
@@ -38,7 +44,8 @@ class ZeptoLocationChecker:
     ):
         if not local_address:
             return False
-        if correct_address.lower() not in local_address.lower():
+
+        if not self.is_local_match_correct(local_address, correct_address):
             err_mesg = f"\n  × {extra_msg}: incorrect location!"
             logger.warn(err_mesg)
             info_dict = {
@@ -60,7 +67,7 @@ class ZeptoLocationChecker:
         try:
             local_storage_dict = deserialize_str_to_json(local_storage_str)
             tab_address = dict_get(
-                local_storage_dict, "state.userPosition.shortAddress", ""
+                local_storage_dict, "state.userPosition.formattedAddress", ""
             )
             correct_address = self.get_correct_address(location_idx)
             return self.check_address(
@@ -74,7 +81,7 @@ class ZeptoLocationChecker:
         self, product_info: dict, location_idx: int, extra_msg: str = ""
     ):
         product_address = dict_get(
-            product_info, "local_storage.state.userPosition.shortAddress", ""
+            product_info, "local_storage.state.userPosition.formattedAddress", ""
         )
         correct_address = self.get_correct_address(location_idx)
         return self.check_address(product_address, correct_address, extra_msg)
@@ -104,6 +111,9 @@ class ZeptoLocationSwitcher:
             location_name = location_dict.get("name", "")
             location_text = location_dict.get("text", "")
             logger.file(f"  * {location_name} ({location_text})")
+
+            # logger.mesg(f"  * Clear cache (cookies, local_storage) ...")
+            # tab.clear_cache()
 
             sleep(3)
             location_button = tab.ele("xpath=//button[@aria-label='Select Location']")

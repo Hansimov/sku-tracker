@@ -12,7 +12,7 @@ from configs.envs import WEBSITE_LITERAL
 WEBSITE_DUMP_ADDRESS_KEYS_DICT = {
     "blinkit": "cookies.gr_1_locality",
     "swiggy": "userLocation.address",
-    "zepto": "local_storage.state.userPosition.shortAddress",
+    "zepto": "local_storage.state.userPosition.formattedAddress",
     "dmart": "cookies.guest.preferredPIN",
 }
 WEBSITE_LOCATIONS_DICT = {
