@@ -130,9 +130,10 @@ class ZeptoLocationSwitcher:
 
             sleep(2)
             location_container = tab.ele(
-                "xpath=//div[@data-testid='address-search-container']//div[1]"
+                "xpath=//div[@data-testid='address-search-container']//div[1]//div[1]"
             )
             logger.mesg(f"  * Click most-related location suggestion ...")
+            logger.file(f"{location_container.text}", indent=4)
             sleep(3)
             location_container.click()
 
