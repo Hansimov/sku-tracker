@@ -292,7 +292,7 @@ def run_scrape_batcher(args: argparse.Namespace):
 
 def main(args: argparse.Namespace):
     if args.scrape:
-        with Retrier(max_retries=30, retry_interval=60) as retrier:
+        with Retrier(max_retries=50, retry_interval=60) as retrier:
             retrier.run(run_scrape_batcher, args=args)
 
     if args.extract:

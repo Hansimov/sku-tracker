@@ -86,6 +86,13 @@ export DBUS_SESSION_BUS_ADDRESS=none
 
 ## Commands
 
+Set environment variables:
+
+```sh
+# Xvfb -ac :99 -screen 0 1280x1024x16 &
+export DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none
+```
+
 Scrape items of different websites:
 
 ```sh
@@ -127,6 +134,14 @@ Weekly summary and email:
 ./cli/run.sh -w
 ```
 
+Run daily task mannually:
+
+```sh
+DATE_STR="2025-08-21"
+./cli/run.sh -e -d "$DATE_STR"
+python -m file.excel_merger -m -k -d "$DATE_STR"
+python -m file.email -c -d "$DATE_STR"
+```
 
 ## Actions
 
