@@ -12,7 +12,8 @@ class ScrapeBatcherAction:
         self.pattern = "****-**-** 13:00:00"
         log_name = f"action_scrape_batcher_{website}.log"
         self.perioder = Perioder(self.pattern, log_path=LOGS_ROOT / log_name)
-        self.cmd_scrape = f"python -m web.{website}.batcher -s"
+        self.env = "DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none"
+        self.cmd_scrape = f"{self.env} python -m web.{website}.batcher -s"
 
     def desc_func(self, run_dt_str: str):
         self.func_strs = [self.cmd_scrape]

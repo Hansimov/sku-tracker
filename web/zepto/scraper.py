@@ -116,7 +116,7 @@ class ZeptoLocationSwitcher:
             # tab.clear_cache()
 
             sleep(3)
-            location_button = tab.ele("xpath=//button[@aria-label='Select Location']")
+            location_button = tab.ele("xpath=//button[@aria-haspopup='dialog']")
             logger.mesg(f"  * Click location select ...")
             location_button.click()
 
