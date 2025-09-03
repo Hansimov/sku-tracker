@@ -12,7 +12,9 @@ from configs.envs import DATA_ROOT, ZEPTO_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.zepto.scraper import ZeptoLocationChecker, ZeptoLocationSwitcher
 from web.zepto.scraper import ZeptoBrowserScraper, ZeptoProductDataExtractor
-from file.local_dump import LocalAddressExtractor
+from web.logs import log_link_idx, log_traceback
+from file.local_dump import LocalAddressExtractor, ZeptoProductRespChecker
+from file.record import LinksRecorder
 from cli.arg import BatcherArgParser
 
 WEBSITE_NAME = "zepto"
@@ -54,7 +56,9 @@ class ZeptoScrapeBatcher:
         self.scraper = ZeptoBrowserScraper(date_str=date_str)
         self.extractor = ZeptoProductDataExtractor()
         self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
+        self.product_checker = ZeptoProductRespChecker()
         self.checker = ZeptoLocationChecker()
+        self.recorder = LinksRecorder(website=WEBSITE_NAME, date_str=date_str)
 
     def close_switcher(self):
         try:
@@ -77,36 +81,70 @@ class ZeptoScrapeBatcher:
             location_text = location_item.get("text", "")
             links = zepto_links[:]
             is_set_location = False
-            for link_idx, link in enumerate(links):
-                if not link:
-                    # logger.mesg(f"> Skip empty link at row [{link_idx}]")
-                    continue
-                else:
-                    logger.note(
-                        f"[{logstr.mesg(link_idx+1)}/{logstr.file(len(links))}]",
-                        end=" ",
-                    )
-                product_id = link.split("/")[-1].strip()
-                dump_path = self.scraper.get_dump_path(product_id, parent=location_name)
-                if self.skip_exists and dump_path.exists():
-                    if self.addr_extractor.check_dump_path_location(
-                        dump_path, correct_location_name=location_name
-                    ):
-                        # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+            # multiple runs to scan and recover missing products
+            for loop_idx in range(3):
+                for link_idx, link in enumerate(links):
+                    is_log_link_idx = False
+                    if not link:
+                        # logger.mesg(f"> Skip empty link at row [{link_idx}]")
                         continue
-                    else:
-                        logger.warn(f"> Remove local dump file, and re-scrape")
-                        logger.file(f"  * {dump_path}")
-                        dump_path.unlink(missing_ok=True)
-                if not is_set_location:
-                    logger.hint(f"> New Location: {location_name} ({location_text})")
-                    self.switcher.set_location(location_idx)
-                    is_set_location = True
-                product_info = self.scraper.run(product_id, parent=location_name)
-                self.checker.check_product_location(product_info, location_idx)
-                extracted_data = self.extractor.extract(product_info)
-                if extracted_data:
-                    sleep(3)
+
+                    record_params = {
+                        "website": WEBSITE_NAME,
+                        "location": location_name,
+                        "link": link,
+                    }
+                    if not self.recorder.is_record_good(**record_params, max_count=3):
+                        if loop_idx == 0:
+                            logger.warn(
+                                f"* Skip link for too many error times: {logstr.file(link)}"
+                            )
+                        continue
+
+                    product_id = link.split("/")[-1].strip()
+                    dump_path = self.scraper.get_dump_path(
+                        product_id, parent=location_name
+                    )
+                    if self.skip_exists and dump_path.exists():
+                        location_check = self.addr_extractor.check_dump_path_location(
+                            dump_path, correct_location_name=location_name
+                        )
+                        product_check = self.product_checker.check(dump_path)
+                        if location_check and product_check:
+                            # logger.note(f"> Skip exists:  {logstr.file(brk(dump_path))}")
+                            continue
+                        else:
+                            if not is_log_link_idx:
+                                log_link_idx(link_idx, len(links))
+                                is_log_link_idx = True
+                            logger.file(f"  * {dump_path}")
+                            if not location_check:
+                                logger.warn(f"  × Incorrect location")
+                            if not product_check:
+                                logger.warn(f"  × Incorrect product")
+                            logger.warn(f"> Remove local dump file, and re-scrape")
+                            self.recorder.update_record(**record_params)
+                            dump_path.unlink(missing_ok=True)
+                    if not is_set_location:
+                        logger.hint(
+                            f"> New Location: {location_name} ({location_text})"
+                        )
+                        self.switcher.set_location(location_idx)
+                        is_set_location = True
+                    if not is_log_link_idx:
+                        log_link_idx(link_idx, len(links))
+                        is_log_link_idx = True
+                    try:
+                        product_info = self.scraper.run(
+                            product_id, parent=location_name
+                        )
+                    except Exception as e:
+                        self.recorder.update_record(**record_params)
+                        continue
+                    self.checker.check_product_location(product_info, location_idx)
+                    extracted_data = self.extractor.extract(product_info)
+                    if extracted_data:
+                        sleep(3)
         self.close_scraper()
 
 
@@ -225,7 +263,7 @@ def run_scrape_batcher(args: argparse.Namespace):
         )
         scraper_batcher.run()
     except Exception as e:
-        logger.warn(e)
+        log_traceback(e)
         logger.warn(f"> Closing tabs ...")
         sleep(5)
         scraper_batcher.close_scraper()

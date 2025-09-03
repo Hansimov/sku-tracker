@@ -106,3 +106,17 @@ class DmartProductRespChecker:
         if not resp:
             return False
         return self.check_product_resp(resp)
+
+
+class ZeptoProductRespChecker:
+    def check_product_resp(self, resp: dict) -> bool:
+        item_data = dict_get(resp, "resp.pageLayout.header.widget.data.productInfo")
+        if not item_data:
+            return False
+        return True
+
+    def check(self, dump_path: Path) -> bool:
+        resp = load_resp_from_dump_path(dump_path)
+        if not resp:
+            return False
+        return self.check_product_resp(resp)
