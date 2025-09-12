@@ -142,6 +142,12 @@ class SwiggyBrowserScraper:
         dict_set(resp, "misc", {})
         dict_set(resp, ["instamart", "footerData"], {})
         dict_set(resp, ["instamart", "cachedProductItemData", "widgetsState"], [])
+        dict_set(resp, ["productV2", "cards"], [])
+        variant_keys = ["productV2", "itemData", "variations"]
+        variants = dict_get(resp, variant_keys, [])
+        for var_idx, variant in enumerate(variants):
+            for sub_key in ["medias", "offerPanels", "imageIds"]:
+                dict_set(resp, variant_keys + [var_idx, sub_key], [])
         return resp
 
     def fetch(self, product_id: Union[str, int], save_cookies: bool = True) -> dict:
@@ -206,17 +212,15 @@ class SwiggyProductDataExtractor:
         logger.note(f"  > Extracting product Data ...")
 
         # meta info
-        item_state = dict_get(
-            resp, ["instamart", "cachedProductItemData", "lastItemState"], {}
-        )
-        variant = dict_get(item_state, ["variations", var_idx], {})
+        item_data = dict_get(resp, "productV2.itemData", {})
+        variant = dict_get(item_data, ["variations", var_idx], {})
 
         # get product_id, product_name
-        product_id = dict_get(item_state, "product_id", None)
-        product_name = dict_get(variant, "display_name", None)
+        product_id = dict_get(item_data, "productId", None)
+        product_name = dict_get(variant, "displayName", None)
 
         # get in_stock flag (Y/N/-)
-        in_stock = dict_get(item_state, "in_stock", None)
+        in_stock = dict_get(variant, "inventory.inStock", None)
         if in_stock is True:
             in_stock_flag = 1
         elif in_stock is False:
@@ -226,9 +230,13 @@ class SwiggyProductDataExtractor:
 
         # get price, mrp, unit
         price_dict = dict_get(variant, "price", {})
-        price = dict_get(price_dict, "offer_price", None)
-        mrp = dict_get(price_dict, "mrp", None)
-        unit = dict_get(variant, "quantity", None)
+        price = dict_get(price_dict, "offerPrice.units", None)
+        if price:
+            price = int(price)
+        mrp = dict_get(price_dict, "mrp.units", None)
+        if mrp:
+            mrp = int(mrp)
+        unit = dict_get(variant, "quantityDescription", None)
 
         # get location
         location = self.address_extractor.get_column_location(resp)
@@ -268,9 +276,7 @@ class SwiggyProductDataExtractor:
             )
 
     def extract_closest_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
-        variants = dict_get(
-            resp, "instamart.cachedProductItemData.lastItemState.variations", []
-        )
+        variants = dict_get(resp, "productV2.itemData.variations", [])
         res = {}
         variant_num = len(variants)
         for var_idx in range(variant_num):
@@ -309,7 +315,7 @@ def test_browser_scraper():
     scraper = SwiggyBrowserScraper()
     # product_id = "MW5MP8UE57"
     # product_id = "A05X4XH0BU"
-    product_id = "YR2XETQJK3"
+    product_id = "BEOLDFMBIB"
     product_info = scraper.fetch(product_id, save_cookies=True)
     scraper.dump(product_id, product_info)
 

@@ -82,7 +82,7 @@ class LocalAddressExtractor:
 
 class SwiggyProductRespChecker:
     def check_product_resp(self, resp: dict) -> bool:
-        item_data = dict_get(resp, "instamart.cachedProductItemData")
+        item_data = dict_get(resp, "productV2.itemData.variations")
         if not item_data:
             return False
         return True
