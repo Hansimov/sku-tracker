@@ -514,6 +514,7 @@ class ExcelPackager:
         date_mark = f"{date_str_beg}_{date_str_end}"
         date_week = self.dates[0].isocalendar().week
         self.package_path = self.package_root / f"sku_ww{date_week}_{date_mark}.xlsx"
+        self.package_sheet_name = f"WW{date_week}_{date_mark}"
 
     def init_xlsx_paths(self) -> list[Path]:
         """Get all xlsx paths by date_strs"""
@@ -528,9 +529,8 @@ class ExcelPackager:
         if "Sheet" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Sheet"])
 
-    def write_df_to_sheet(self, df: pd.DataFrame, date_str: str):
+    def write_df_to_sheet(self, df: pd.DataFrame, sheet_name: str):
         """Write dataframe to new sheet in workbook"""
-        sheet_name = f"{date_str}"
         sheet = self.workbook.create_sheet(title=sheet_name)
         # write headers
         for col_idx, column in enumerate(df.columns, 1):
@@ -548,15 +548,24 @@ class ExcelPackager:
         self.workbook.save(self.package_path)
         logger.okay(f"  * {self.package_path}")
 
-    def package(self):
+    def package(self, sheet_format: Literal["by_date", "all_in_one"] = "all_in_one"):
         logger.note(f"> Packaging xlsx files for:")
+        df_dates: list[tuple[pd.DataFrame, str]] = []
         for date_str, xlsx_path in zip(self.date_strs, self.xlsx_paths):
             if not xlsx_path.exists():
                 logger.warn(f"  × {xlsx_path}")
                 continue
             logger.file(f"  * {xlsx_path}")
             df = read_df_from_xlsx(xlsx_path)
-            self.write_df_to_sheet(df, date_str)
+            df_dates.append((df, date_str))
+
+        if sheet_format == "by_date":
+            for df, date_str in df_dates:
+                self.write_df_to_sheet(df, date_str)
+        else:
+            all_df = merge_dfs([df for df, _ in df_dates], "vertical")
+            self.write_df_to_sheet(all_df, self.package_sheet_name)
+
         self.save_workbook()
 
 
