@@ -22,8 +22,11 @@ BLINKIT_PRN_URL = "https://blinkit.com/prn/x/prid"
 
 
 class BlinkitLocationChecker:
+    def __init__(self, locations: list = None):
+        self.locations = locations or BLINKIT_LOCATIONS
+
     def get_correct_address(self, location_idx: int) -> str:
-        return BLINKIT_LOCATIONS[location_idx].get("locality", "")
+        return self.locations[location_idx].get("locality", "")
 
     def unify_address(self, address: str) -> str:
         if address:
@@ -74,9 +77,11 @@ class BlinkitLocationChecker:
 
 
 class BlinkitLocationSwitcher:
-    def __init__(self):
+    def __init__(self, client_settings: dict = None, locations: list = None):
+        self.client_settings = client_settings or BLINKIT_BROWSER_SETTING
+        self.locations = locations or BLINKIT_LOCATIONS
         self.checker = BlinkitLocationChecker()
-        self.client = BrowserClient(**BLINKIT_BROWSER_SETTING)
+        self.client = BrowserClient(**self.client_settings)
 
     def set_location(self, location_idx: int = 0) -> dict:
         self.client.start_client()
@@ -93,7 +98,7 @@ class BlinkitLocationSwitcher:
         else:
             logger.note(f"  > Setting location:")
             self.clicker = BlinkitLocationClicker(tab=tab, suffix=WEBSITE_NAME)
-            location_dict = BLINKIT_LOCATIONS[location_idx]
+            location_dict = self.locations[location_idx]
             location_text = location_dict.get("text", "")
             location_shot = location_dict.get("shot", "")
             logger.file(f"    * {location_text}")
