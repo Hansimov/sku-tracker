@@ -5,7 +5,8 @@ from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from time import sleep
 from typing import Union
-from tclogger import logger, logstr, brk, get_now_str, dict_set_all
+from tclogger import logger, logstr, brk, get_now_str
+from tclogger import dict_get, dict_set_all
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_TRAVERSER_SETTING
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
@@ -18,6 +19,7 @@ BLINKIT_CATEG_URL = "https://blinkit.com/categories"
 BLINKIT_FLAG_URL = "https://blinkit.com/api/feature-flags/receive"
 BLINKIT_CATEG_JS = "https://blinkit.com/.*/categories.*js"
 BLINKIT_DEEPLINK_URL = "https://blinkit.com/v2/search/deeplink"
+BLINKIT_LISTING_URL = "https://blinkit.com/v1/layout/listing_widgets"
 # -/(\.(js|woff|css|svg|ico|png)|data:)/
 
 
@@ -158,12 +160,41 @@ class BlinkitCategoriesFetcher:
             return {}
 
 
+class BlinkitListingExtractor:
+    def snippet_to_dict(self, snippet: dict) -> dict:
+        data = dict_get(snippet, "data", {})
+        atc = dict_get(data, "atc_action.add_to_cart.cart_item", {})
+        snippet_dict = {
+            "product_id": dict_get(atc, "product_id", None),
+            "product_name": dict_get(atc, "product_name", None),
+            "quantity": dict_get(atc, "quantity", None),
+            "price": dict_get(atc, "price", None),
+            "mrp": dict_get(atc, "mrp", None),
+            "unit": dict_get(atc, "unit", None),
+            "inventory": dict_get(atc, "inventory", None),
+            "group_id": dict_get(atc, "group_id", None),
+            "brand": dict_get(atc, "brand", None),
+            "is_sold_out": dict_get(data, "is_sold_out", None),
+            "product_state": dict_get(data, "product_state", None),
+        }
+        return snippet_dict
+
+    def extract(self, resp: dict) -> list[dict]:
+        res = []
+        snippets = dict_get(resp, "response.snippets", [])
+        for snippet in snippets:
+            snippet_dict = self.snippet_to_dict(snippet)
+            res.append(snippet_dict)
+        return res
+
+
 class BlinkitCategoryScraper:
     def __init__(self, client: BrowserClient, date_str: str = None):
         self.client = client
         self.date_str = norm_date_str(date_str)
         self.dump_root = get_dump_root(self.date_str)
         self.categ_path = get_categ_dump_path(self.date_str)
+        self.extractor = BlinkitListingExtractor()
 
     def categ_info_to_url(self, name: str, cid: int, sid: int) -> str:
         """Example:
@@ -187,17 +218,66 @@ class BlinkitCategoryScraper:
 
     def scrape(self, url: str) -> list:
         tab = self.client.browser.latest_tab
+        listen_targets = [BLINKIT_LISTING_URL]
+        tab.listen.start(targets=listen_targets)
         tab.set.load_mode.none()
         tab.get(url)
+
+        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
+        logger.note(f"  > Listening targets:")
+        for target in listen_targets:
+            logger.file(f"    * {target}")
+
+        listing_data = []
+        for packet in tab.listen.steps(timeout=30):
+            packet_url = packet.url
+            packet_url_str = logstr.file(brk(packet_url))
+            if packet_url.startswith(BLINKIT_LISTING_URL):
+                logger.okay(f"  + Listing packet captured: {packet_url_str}")
+                resp = packet.response
+                if resp:
+                    resp_data = self.extractor.extract(resp.body)
+                    item_count = len(resp_data)
+                    logger.mesg(f"    * Extracted {item_count} items")
+                    listing_data.extend(resp_data)
+                    if item_count < 15:
+                        tab.stop_loading()
+                        break
+            else:
+                logger.warn(f"  × Unexpected packet: {packet_url_str}")
+        return listing_data
+
+    def save_json(self, data: list[dict], save_path: Path):
+        logger.okay(f"  ✓ Save {len(data)} items to:", end=" ")
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as wf:
+            json.dump(data, wf, ensure_ascii=False, indent=4)
+        logger.okay(f"{brk(save_path)}")
+
+    def load_json(self, json_path: Path) -> list:
+        if not json_path.exists():
+            return []
+        with open(json_path, "r", encoding="utf-8") as rf:
+            data = json.load(rf)
+        return data
+
+    def is_json_path_okay(self, json_path: Path) -> bool:
+        if not json_path.exists():
+            return False
+        data = self.load_json(json_path)
+        if not data:
+            return False
+        return True
 
     def run(self):
         self.load_categories()
         categs_count = len(self.categories)
+        self.client.start_client()
         for categ_idx, categ in enumerate(self.categories):
             cname = categ.get("name", "")
             cid = categ.get("id", -1)
             categ_idx_str = f"[{logstr.file(categ_idx+1)}/{logstr.mesg(categs_count)}]"
-            logger.note(f"> {categ_idx_str} categ: {cname} ({cid})")
+            logger.note(f"> {categ_idx_str} {cname} (cid/{cid})")
             sub_categs = categ.get("subCategories", [])
             sub_categs_count = len(sub_categs)
             for sub_categ_idx, sub_categ in enumerate(sub_categs):
@@ -207,9 +287,24 @@ class BlinkitCategoryScraper:
                 sub_categ_idx_str = (
                     f"[{logstr.file(sub_categ_idx+1)}/{logstr.mesg(sub_categs_count)}]"
                 )
-                sub_categ_str = logstr.note(f"(cid/{cid}/{sid}) {sname}")
-                logger.note(f"  * {sub_categ_idx_str} sub_categ: {sub_categ_str}")
-                logger.file(f"    * {url}")
+                sub_categ_str = logstr.note(f"{sname} (cid/{cid}/{sid})")
+                logger.note(f"  * {sub_categ_idx_str} {sub_categ_str}:", end=" ")
+                logger.file(f"{url}")
+                json_path = self.dump_root / f"{cid}" / f"{cid}_{sid}.json"
+                with logger.temp_indent(2):
+                    if self.is_json_path_okay(json_path):
+                        logger.mesg(
+                            f"  * Skip existed json: {logstr.file(brk(json_path))}"
+                        )
+                    else:
+                        scrape_data = self.scrape(url)
+                        self.save_json(scrape_data, json_path)
+                raise NotImplementedError(
+                    "× Category page scraping not implemented yet."
+                )
+
+                sleep(10)
+        self.client.stop_client()
 
 
 class BlinkitTraverser:
