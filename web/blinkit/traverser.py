@@ -245,6 +245,10 @@ class BlinkitSubCategoryContext:
     def idx_label_str(self) -> str:
         return f"{self.idx_str()} {self.label_str()}"
 
+    def log_info(self):
+        logger.note(f"  * {self.idx_label_str()}:", end=" ")
+        logger.file(f"{self.url}")
+
 
 @dataclass
 class BlinkitCategoryContext:
@@ -264,8 +268,8 @@ class BlinkitCategoryContext:
     def idx_label_str(self) -> str:
         return f"{self.idx_str()} {self.label_str()}"
 
-    def iter_sctxs(self):
-        yield from self.sctxs
+    def log_info(self):
+        logger.note(f"> {self.idx_label_str()}")
 
 
 class BlinkitCategoryIterator:
@@ -273,15 +277,15 @@ class BlinkitCategoryIterator:
         self.date_str = norm_date_str(date_str)
         self.location = location
         self.dump_root = get_dump_root(self.date_str)
-        self.categ_path = get_categ_dump_path(self.date_str)
-        self.categories = self.load_categories()
+        self.load_categories()
 
     def load_categories(self) -> list[dict]:
+        self.categ_path = get_categ_dump_path(self.date_str)
         if not self.categ_path.exists():
             return []
         with open(self.categ_path, "r", encoding="utf-8") as rf:
             categ_data = json.load(rf)
-        return categ_data.get("categories", []) or []
+        self.categories = categ_data.get("categories", []) or []
 
     def get_json_path(self, cid: int, sid: int) -> Path:
         cid_str = str(cid)
@@ -403,14 +407,30 @@ class BlinkitCategoryScraper:
             return False
         return True
 
+    def construct_save_data(
+        self,
+        cctx: BlinkitCategoryContext,
+        sctx: BlinkitSubCategoryContext,
+        products_data: list[dict],
+    ) -> dict:
+        save_data = {
+            "url": sctx.url,
+            "categ": cctx.cname,
+            "sub_categ": sctx.sname,
+            "cid": cctx.cid,
+            "sid": sctx.sid,
+            "count": len(products_data),
+            "products": products_data,
+        }
+        return save_data
+
     def run(self, location: str = None):
         iterator = BlinkitCategoryIterator(date_str=self.date_str, location=location)
         self.client.start_client()
         for cctx in iterator:
-            logger.note(f"> {cctx.idx_label_str()}")
-            for sctx in cctx.iter_sctxs():
-                logger.note(f"  * {sctx.idx_label_str()}:", end=" ")
-                logger.file(f"{sctx.url}")
+            cctx.log_info()
+            for sctx in cctx.sctxs:
+                sctx.log_info()
                 json_path = sctx.json_path
                 if self.is_json_path_okay(json_path):
                     with logger.temp_indent(2):
@@ -418,15 +438,9 @@ class BlinkitCategoryScraper:
                 else:
                     with logger.temp_indent(2):
                         products_data = self.scrape(sctx.url)
-                        save_data = {
-                            "url": sctx.url,
-                            "categ": cctx.cname,
-                            "sub_categ": sctx.sname,
-                            "cid": cctx.cid,
-                            "sid": sctx.sid,
-                            "count": len(products_data),
-                            "products": products_data,
-                        }
+                        save_data = self.construct_save_data(
+                            cctx=cctx, sctx=sctx, products_data=products_data
+                        )
                         self.save_json(save_data, json_path)
                         logger.note(f"  > Waiting for next ...")
                         sleep(8)
@@ -467,7 +481,7 @@ class BlinkitTraverser:
             categ_path = self.fetcher.dump_path
             if self.skip_exists and categ_path.exists():
                 logger.mesg(
-                    f"> Skip fetch exited categories: {logstr.file(brk(categ_path))}"
+                    f"> Skip fetch existed categories: {logstr.file(brk(categ_path))}"
                 )
             else:
                 if not is_set_location:
