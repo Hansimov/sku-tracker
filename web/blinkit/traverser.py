@@ -195,6 +195,7 @@ class BlinkitCategoryScraper:
         self.dump_root = get_dump_root(self.date_str)
         self.categ_path = get_categ_dump_path(self.date_str)
         self.extractor = BlinkitListingExtractor()
+        self.location_name = None
 
     def categ_info_to_url(self, name: str, cid: int, sid: int) -> str:
         """Example:
@@ -247,6 +248,16 @@ class BlinkitCategoryScraper:
                 logger.warn(f"  × Unexpected packet: {packet_url_str}")
         return listing_data
 
+    def get_json_path(self, cid: int, sid: int) -> Path:
+        cid_str = str(cid)
+        parts = [cid_str, f"{cid_str}_{sid}.json"]
+        if self.location_name:
+            parts = [self.location_name] + parts
+        return self.dump_root.joinpath(*parts)
+
+    def skip_json(self, json_path: Path):
+        logger.mesg(f"  ✓ Skip existed json: {logstr.file(brk(json_path))}")
+
     def save_json(self, data: list[dict], save_path: Path):
         logger.okay(f"  ✓ Save {len(data)} items to:", end=" ")
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -290,18 +301,15 @@ class BlinkitCategoryScraper:
                 sub_categ_str = logstr.note(f"{sname} (cid/{cid}/{sid})")
                 logger.note(f"  * {sub_categ_idx_str} {sub_categ_str}:", end=" ")
                 logger.file(f"{url}")
-                json_path = self.dump_root / f"{cid}" / f"{cid}_{sid}.json"
-                with logger.temp_indent(2):
-                    if self.is_json_path_okay(json_path):
-                        logger.mesg(
-                            f"  * Skip existed json: {logstr.file(brk(json_path))}"
-                        )
-                    else:
+                json_path = self.get_json_path(cid=cid, sid=sid)
+                if self.is_json_path_okay(json_path):
+                    with logger.temp_indent(2):
+                        self.skip_json(json_path)
+                else:
+                    with logger.temp_indent(2):
                         scrape_data = self.scrape(url)
                         self.save_json(scrape_data, json_path)
-                raise NotImplementedError(
-                    "× Category page scraping not implemented yet."
-                )
+                raise NotImplementedError("× In Develop Mode")
 
                 sleep(10)
         self.client.stop_client()
@@ -347,6 +355,7 @@ class BlinkitTraverser:
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 self.fetcher.run()
+            self.scraper.location_name = location_name
             self.scraper.run()
 
 
