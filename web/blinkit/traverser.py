@@ -188,14 +188,50 @@ class BlinkitListingExtractor:
         return res
 
 
+class BlinkitListingScroller:
+    def __init__(self):
+        self.scroll_js = """
+        (async () => {
+            const container = document.querySelector('#plpContainer');
+            if (!container) {
+                return { ok: false, reason: 'container-not-found' };
+            }
+            // scroll up
+            const topBeforeUp = container.scrollTop;
+            container.scrollTop = Math.max(topBeforeUp - 100, 0);
+            // sleep to ensure scroll up completed
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            // scroll down
+            const topBeforeDown = container.scrollTop;
+            const maxScroll = Math.max(container.scrollHeight - container.clientHeight, 0);
+            container.scrollTop = maxScroll;
+            return { ok: true };
+        })()
+        """
+
+    def scroll(self, tab: ChromiumTab) -> bool:
+        try:
+            logger.note(f"  > Scrolling listing container ...")
+            js_res = tab.run_js(self.scroll_js, as_expr=True)
+        except Exception as e:
+            logger.warn(f"  × Scroll JS failed: {e}")
+            return False
+        if isinstance(js_res, dict) and js_res.get("ok"):
+            return True
+        else:
+            logger.warn(f"  × Scroll JS result: {js_res}")
+            return False
+
+
 class BlinkitCategoryScraper:
     def __init__(self, client: BrowserClient, date_str: str = None):
         self.client = client
         self.date_str = norm_date_str(date_str)
+        self.location_name = None
         self.dump_root = get_dump_root(self.date_str)
         self.categ_path = get_categ_dump_path(self.date_str)
         self.extractor = BlinkitListingExtractor()
-        self.location_name = None
+        self.scroller = BlinkitListingScroller()
 
     def categ_info_to_url(self, name: str, cid: int, sid: int) -> str:
         """Example:
@@ -244,6 +280,13 @@ class BlinkitCategoryScraper:
                     if item_count < 15:
                         tab.stop_loading()
                         break
+                    else:
+                        scroll_res = self.scroller.scroll(tab)
+                        if not scroll_res:
+                            logger.warn("  × Unable to scroll listing container")
+                            break
+                        else:
+                            sleep(3)
             else:
                 logger.warn(f"  × Unexpected packet: {packet_url_str}")
         return listing_data
@@ -308,10 +351,10 @@ class BlinkitCategoryScraper:
                 else:
                     with logger.temp_indent(2):
                         scrape_data = self.scrape(url)
+                        # sleep(5)
                         self.save_json(scrape_data, json_path)
-                raise NotImplementedError("× In Develop Mode")
+                    raise NotImplementedError("× In Develop Mode")
 
-                sleep(10)
         self.client.stop_client()
 
 
