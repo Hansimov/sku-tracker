@@ -247,14 +247,17 @@ class SwiggyExtractBatcher:
                 )
                 try:
                     self.checker.check_product_location(
-                        product_info, location_idx, extra_msg="SwiggyExtractBatcher"
+                        product_info,
+                        location_idx,
+                        extra_msg="SwiggyExtractBatcher",
                     )
                 except Exception as e:
                     logger.warn(
-                        f"    * swiggy.{location_name}.{product_id}: "
+                        f"    * Remove local file: [swiggy.{location_name}.{product_id}]: "
                         f"{logstr.file(brk(product_info_path))}"
                     )
-                    raise e
+                    product_info_path.unlink(missing_ok=True)
+                    # raise e
                 ref_mrp = self.ref_loader.load(
                     location_name=location_name, idx=link_idx
                 )
