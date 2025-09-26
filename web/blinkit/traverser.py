@@ -1,10 +1,11 @@
 import json
 import re
 
+from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from time import sleep
-from typing import Union
+from typing import Callable, Union
 from tclogger import logger, logstr, brk, get_now_str
 from tclogger import dict_get, dict_set_all
 
@@ -223,35 +224,125 @@ class BlinkitListingScroller:
             return False
 
 
-class BlinkitCategoryScraper:
-    def __init__(self, client: BrowserClient, date_str: str = None):
-        self.client = client
+@dataclass
+class BlinkitSubCategoryContext:
+    sidx: int
+    stotal: int
+    sname: str
+    sid: int
+    url: str
+    json_path: Path
+    cname: str
+    cid: int
+    data: dict
+
+    def idx_str(self) -> str:
+        return f"[{logstr.file(self.sidx)}/{logstr.mesg(self.stotal)}]"
+
+    def label_str(self) -> str:
+        return logstr.note(f"{self.sname} (cid/{self.cid}/{self.sid})")
+
+    def idx_label_str(self) -> str:
+        return f"{self.idx_str()} {self.label_str()}"
+
+
+@dataclass
+class BlinkitCategoryContext:
+    cidx: int
+    ctotal: int
+    cname: str
+    cid: int
+    data: dict
+    sctxs: list[BlinkitSubCategoryContext]
+
+    def idx_str(self) -> str:
+        return f"[{logstr.file(self.cidx)}/{logstr.mesg(self.ctotal)}]"
+
+    def label_str(self) -> str:
+        return logstr.note(f"{self.cname} (cid/{self.cid})")
+
+    def idx_label_str(self) -> str:
+        return f"{self.idx_str()} {self.label_str()}"
+
+    def iter_sctxs(self):
+        yield from self.sctxs
+
+
+class BlinkitCategoryIterator:
+    def __init__(self, date_str: str = None, location: str = None):
         self.date_str = norm_date_str(date_str)
-        self.location = None
+        self.location = location
         self.dump_root = get_dump_root(self.date_str)
         self.categ_path = get_categ_dump_path(self.date_str)
-        self.extractor = BlinkitListingExtractor()
-        self.scroller = BlinkitListingScroller()
+        self.categories = self.load_categories()
 
-    def categ_info_to_url(self, name: str, cid: int, sid: int) -> str:
-        """Example:
-        "Chicken, Meat & Fish" > "Exotic Meat"
-        - name: "Exotic Meat"
-        - mark: "exotic-meat"
-        - cid: 4
-        - sid: 1201
-        - url: https://blinkit.com/cn/exotic-meat/cid/4/1201
-        """
-        # replace non-alphanumeric characters with hyphens
-        mark = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
-        return f"https://blinkit.com/cn/{mark}/cid/{cid}/{sid}"
-
-    def load_categories(self):
+    def load_categories(self) -> list[dict]:
         if not self.categ_path.exists():
             return []
         with open(self.categ_path, "r", encoding="utf-8") as rf:
             categ_data = json.load(rf)
-        self.categories = categ_data.get("categories", [])
+        return categ_data.get("categories", []) or []
+
+    def get_json_path(self, cid: int, sid: int) -> Path:
+        cid_str = str(cid)
+        parts = [cid_str, f"{cid_str}_{sid}.json"]
+        if self.location:
+            parts = [self.location] + parts
+        return self.dump_root.joinpath(*parts)
+
+    def load_json(self, json_path: Path) -> list:
+        if not json_path.exists():
+            return []
+        with open(json_path, "r", encoding="utf-8") as rf:
+            data = json.load(rf)
+        return data
+
+    def get_sub_categ_url(self, name: str, cid: int, sid: int) -> str:
+        mark = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
+        return f"https://blinkit.com/cn/{mark}/cid/{cid}/{sid}"
+
+    def __iter__(self):
+        ctotal = len(self.categories)
+        for cidx, categ in enumerate(self.categories, start=1):
+            cname = categ.get("name", "")
+            cid = categ.get("id", -1)
+            sub_categs = categ.get("subCategories", []) or []
+            stotal = len(sub_categs)
+            sctxs: list[BlinkitSubCategoryContext] = []
+            for sidx, sub_categ in enumerate(sub_categs, start=1):
+                sname = sub_categ.get("name", "")
+                sid = sub_categ.get("id", -1)
+                url = self.get_sub_categ_url(sname, cid, sid)
+                json_path = self.get_json_path(cid=cid, sid=sid)
+                sctxs.append(
+                    BlinkitSubCategoryContext(
+                        sidx=sidx,
+                        stotal=stotal,
+                        sname=sname,
+                        sid=sid,
+                        url=url,
+                        json_path=json_path,
+                        cname=cname,
+                        cid=cid,
+                        data=sub_categ,
+                    )
+                )
+            yield BlinkitCategoryContext(
+                cidx=cidx,
+                ctotal=ctotal,
+                cname=cname,
+                cid=cid,
+                data=categ,
+                sctxs=sctxs,
+            )
+
+
+class BlinkitCategoryScraper:
+    def __init__(self, client: BrowserClient, date_str: str = None):
+        self.client = client
+        self.date_str = norm_date_str(date_str)
+        self.extractor = BlinkitListingExtractor()
+        self.scroller = BlinkitListingScroller()
 
     def scrape(self, url: str) -> list:
         tab = self.client.browser.latest_tab
@@ -268,7 +359,12 @@ class BlinkitCategoryScraper:
         products_data = []
         for packet in tab.listen.steps(timeout=30):
             packet_url = packet.url
-            packet_url_str = logstr.file(brk(packet_url))
+            if len(packet_url) >= 70:
+                packet_url_parts = packet_url.split("&")
+                packet_url_str = "&".join(packet_url_parts[:2])
+            else:
+                packet_url_str = packet_url
+            packet_url_str = logstr.file(brk(packet_url_str))
             if packet_url.startswith(BLINKIT_LISTING_URL):
                 logger.okay(f"  + Listing packet captured: {packet_url_str}")
                 resp = packet.response
@@ -291,13 +387,6 @@ class BlinkitCategoryScraper:
                 logger.warn(f"  × Unexpected packet: {packet_url_str}")
         return products_data
 
-    def get_json_path(self, cid: int, sid: int) -> Path:
-        cid_str = str(cid)
-        parts = [cid_str, f"{cid_str}_{sid}.json"]
-        if self.location:
-            parts = [self.location] + parts
-        return self.dump_root.joinpath(*parts)
-
     def skip_json(self, json_path: Path):
         logger.mesg(f"  ✓ Skip existed json: {logstr.file(brk(json_path))}")
 
@@ -309,52 +398,32 @@ class BlinkitCategoryScraper:
             json.dump(data, wf, ensure_ascii=False, indent=4)
         logger.okay(f"{brk(save_path)}")
 
-    def load_json(self, json_path: Path) -> list:
-        if not json_path.exists():
-            return []
-        with open(json_path, "r", encoding="utf-8") as rf:
-            data = json.load(rf)
-        return data
-
     def is_json_path_okay(self, json_path: Path) -> bool:
         if not json_path.exists():
             return False
         return True
 
-    def run(self):
-        self.load_categories()
-        categs_count = len(self.categories)
+    def run(self, location: str = None):
+        iterator = BlinkitCategoryIterator(date_str=self.date_str, location=location)
         self.client.start_client()
-        for categ_idx, categ in enumerate(self.categories):
-            cname = categ.get("name", "")
-            cid = categ.get("id", -1)
-            categ_idx_str = f"[{logstr.file(categ_idx+1)}/{logstr.mesg(categs_count)}]"
-            logger.note(f"> {categ_idx_str} {cname} (cid/{cid})")
-            sub_categs = categ.get("subCategories", [])
-            sub_categs_count = len(sub_categs)
-            for sub_categ_idx, sub_categ in enumerate(sub_categs):
-                sname = sub_categ.get("name", "")
-                sid = sub_categ.get("id", -1)
-                url = self.categ_info_to_url(name=sname, cid=cid, sid=sid)
-                sub_categ_idx_str = (
-                    f"[{logstr.file(sub_categ_idx+1)}/{logstr.mesg(sub_categs_count)}]"
-                )
-                sub_categ_str = logstr.note(f"{sname} (cid/{cid}/{sid})")
-                logger.note(f"  * {sub_categ_idx_str} {sub_categ_str}:", end=" ")
-                logger.file(f"{url}")
-                json_path = self.get_json_path(cid=cid, sid=sid)
+        for cctx in iterator:
+            logger.note(f"> {cctx.idx_label_str()}")
+            for sctx in cctx.iter_sctxs():
+                logger.note(f"  * {sctx.idx_label_str()}:", end=" ")
+                logger.file(f"{sctx.url}")
+                json_path = sctx.json_path
                 if self.is_json_path_okay(json_path):
                     with logger.temp_indent(2):
                         self.skip_json(json_path)
                 else:
                     with logger.temp_indent(2):
-                        products_data = self.scrape(url)
+                        products_data = self.scrape(sctx.url)
                         save_data = {
-                            "url": url,
-                            "categ": cname,
-                            "sub_categ": sname,
-                            "cid": cid,
-                            "sid": sid,
+                            "url": sctx.url,
+                            "categ": cctx.cname,
+                            "sub_categ": sctx.sname,
+                            "cid": cctx.cid,
+                            "sid": sctx.sid,
                             "count": len(products_data),
                             "products": products_data,
                         }
@@ -406,8 +475,7 @@ class BlinkitTraverser:
                     self.switcher.set_location(location_idx)
                     is_set_location = True
                 self.fetcher.run()
-            self.scraper.location = location_name
-            self.scraper.run()
+            self.scraper.run(location=location_name)
 
 
 def test_traverser():
