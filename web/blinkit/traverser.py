@@ -1,13 +1,13 @@
 import json
+import pandas as pd
 import re
 
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from time import sleep
-from typing import Callable, Union
 from tclogger import logger, logstr, brk, get_now_str
-from tclogger import dict_get, dict_set_all
+from tclogger import dict_get
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_TRAVERSER_SETTING
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
@@ -30,6 +30,13 @@ def get_dump_root(date_str: str = None) -> Path:
 
 def get_categ_dump_path(date_str: str = None) -> Path:
     return get_dump_root(date_str) / "categories.json"
+
+
+def load_json(json_path: Path) -> dict:
+    if not json_path.exists():
+        return {}
+    with open(json_path, "r", encoding="utf-8") as rf:
+        return json.load(rf)
 
 
 class BlinkitCategoriesExtractor:
@@ -294,13 +301,6 @@ class BlinkitCategoryIterator:
             parts = [self.location] + parts
         return self.dump_root.joinpath(*parts)
 
-    def load_json(self, json_path: Path) -> list:
-        if not json_path.exists():
-            return []
-        with open(json_path, "r", encoding="utf-8") as rf:
-            data = json.load(rf)
-        return data
-
     def get_sub_categ_url(self, name: str, cid: int, sid: int) -> str:
         mark = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
         return f"https://blinkit.com/cn/{mark}/cid/{cid}/{sid}"
@@ -445,7 +445,6 @@ class BlinkitCategoryScraper:
                         logger.note(f"  > Waiting for next ...")
                         sleep(8)
                     # raise NotImplementedError("× In Develop Mode")
-
         self.client.stop_client()
 
 
@@ -492,12 +491,85 @@ class BlinkitTraverser:
             self.scraper.run(location=location_name)
 
 
+CATEG_COLUMNS = ["url", "categ", "sub_categ", "cid", "sid"]
+PRODUCT_COLUMNS = [
+    "product_name",
+    "brand",
+    "product_id",
+    "price",
+    "mrp",
+    "unit",
+    "inventory",
+    "product_state",
+]
+DF_INT_COLUMNS = ["cid", "sid", "product_id", "price", "mrp", "inventory"]
+
+
+class BlinkitSummarizer:
+    def __init__(
+        self,
+        date_str: str = None,
+        locations: list = None,
+    ):
+        self.date_str = norm_date_str(date_str)
+        self.locations = locations or BLINKIT_LOCATIONS
+
+    def product_dict_to_row(self, product: dict) -> dict:
+        if product.get("product_id") is None and product.get("product_name") is None:
+            return {}
+        return {col: product.get(col, None) for col in PRODUCT_COLUMNS}
+
+    def categ_dict_to_row(self, data: dict) -> dict:
+        return {col: data.get(col, None) for col in CATEG_COLUMNS}
+
+    def run(self):
+        for location_idx, location_item in enumerate(self.locations[:1]):
+            location = location_item.get("name", "")
+            iterator = BlinkitCategoryIterator(
+                date_str=self.date_str, location=location
+            )
+            rows: list[dict] = []
+            for cctx in iterator:
+                cctx.log_info()
+                for sctx in cctx.sctxs:
+                    json_data = load_json(sctx.json_path)
+                    categ_row = self.categ_dict_to_row(json_data)
+                    products = dict_get(json_data, "products", []) or []
+                    product_rows = [
+                        self.product_dict_to_row(product) for product in products
+                    ]
+                    df_rows = []
+                    for product_row in product_rows:
+                        if not product_row:
+                            continue
+                        df_row = {
+                            "date": self.date_str,
+                            "location": location,
+                            **categ_row,
+                            **product_row,
+                        }
+                        df_rows.append(df_row)
+                    rows.extend(df_rows)
+            df = pd.DataFrame(rows)
+            for col in DF_INT_COLUMNS:
+                if col not in df.columns:
+                    continue
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+            print(df)
+
+
 def test_traverser():
     traverser = BlinkitTraverser(skip_exists=True, date_str=None)
     traverser.run()
 
 
+def test_summarizer():
+    summarizer = BlinkitSummarizer(date_str=None)
+    summarizer.run()
+
+
 if __name__ == "__main__":
-    test_traverser()
+    # test_traverser()
+    test_summarizer()
 
     # python -m web.blinkit.traverser
