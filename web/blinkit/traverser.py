@@ -8,6 +8,7 @@ from pathlib import Path
 from time import sleep
 from tclogger import logger, logstr, brk, get_now_str
 from tclogger import dict_get
+from typing import Literal
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_TRAVERSER_SETTING
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
@@ -37,6 +38,10 @@ def load_json(json_path: Path) -> dict:
         return {}
     with open(json_path, "r", encoding="utf-8") as rf:
         return json.load(rf)
+
+
+def raise_breakpoint():
+    raise NotImplementedError("× In Develop Mode")
 
 
 class BlinkitCategoriesExtractor:
@@ -392,7 +397,8 @@ class BlinkitCategoryScraper:
         return products_data
 
     def skip_json(self, json_path: Path):
-        logger.mesg(f"  ✓ Skip existed json: {logstr.file(brk(json_path))}")
+        with logger.temp_indent(2):
+            logger.mesg(f"  ✓ Skip existed json: {logstr.file(brk(json_path))}")
 
     def save_json(self, data: list[dict], save_path: Path):
         items = dict_get(data, "products", [])
@@ -402,10 +408,20 @@ class BlinkitCategoryScraper:
             json.dump(data, wf, ensure_ascii=False, indent=4)
         logger.okay(f"{brk(save_path)}")
 
-    def is_json_path_okay(self, json_path: Path) -> bool:
+    def check_json_status(
+        self, json_path: Path
+    ) -> Literal["not_exists", "incomplete", "exists"]:
         if not json_path.exists():
-            return False
-        return True
+            return "not_exists"
+        json_data = load_json(json_path)
+        products = dict_get(json_data, "products", []) or []
+        items_count = len(products)
+        if items_count > 0 and items_count % 15 == 0:
+            logger.warn(
+                f"  ? Items count {logstr.mesg(items_count)} is 15x, may be incomplete"
+            )
+            return "incomplete"
+        return "exists"
 
     def construct_save_data(
         self,
@@ -424,27 +440,39 @@ class BlinkitCategoryScraper:
         }
         return save_data
 
+    def process_context(
+        self, cctx: BlinkitCategoryContext, sctx: BlinkitSubCategoryContext
+    ):
+        with logger.temp_indent(2):
+            products_data = self.scrape(sctx.url)
+            save_data = self.construct_save_data(
+                cctx=cctx, sctx=sctx, products_data=products_data
+            )
+            self.save_json(save_data, sctx.json_path)
+
+    def wait_next(self, seconds: int = 8):
+        logger.note(f"  > Waiting {seconds}s for next ...")
+        sleep(seconds)
+
     def run(self, location: str = None):
         iterator = BlinkitCategoryIterator(date_str=self.date_str, location=location)
         self.client.start_client()
         for cctx in iterator:
             cctx.log_info()
             for sctx in cctx.sctxs:
-                sctx.log_info()
                 json_path = sctx.json_path
-                if self.is_json_path_okay(json_path):
-                    with logger.temp_indent(2):
-                        self.skip_json(json_path)
-                else:
-                    with logger.temp_indent(2):
-                        products_data = self.scrape(sctx.url)
-                        save_data = self.construct_save_data(
-                            cctx=cctx, sctx=sctx, products_data=products_data
-                        )
-                        self.save_json(save_data, json_path)
-                        logger.note(f"  > Waiting for next ...")
-                        sleep(8)
-                    # raise NotImplementedError("× In Develop Mode")
+                json_status = self.check_json_status(json_path)
+                if json_status == "exists":
+                    # self.skip_json(json_path)
+                    continue
+                sctx.log_info()
+                if json_status == "incomplete":
+                    raise_breakpoint()
+                    continue
+                # not_exists/incomplete: scrape and save
+                self.process_context(cctx=cctx, sctx=sctx)
+                self.wait_next(8)
+                # raise_breakpoint()
         self.client.stop_client()
 
 
@@ -569,7 +597,7 @@ def test_summarizer():
 
 
 if __name__ == "__main__":
-    # test_traverser()
-    test_summarizer()
+    test_traverser()
+    # test_summarizer()
 
     # python -m web.blinkit.traverser
