@@ -2,6 +2,7 @@ import argparse
 import json
 import pandas as pd
 import re
+from urllib.parse import parse_qs, urlparse
 
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
@@ -357,6 +358,52 @@ class BlinkitCategoryScraper:
         self.date_str = norm_date_str(date_str)
         self.extractor = BlinkitListingExtractor()
         self.scroller = BlinkitListingScroller()
+        self.last_offset: int = None
+        self.same_offset_count: int = 0
+
+    def reset_offset_state(self):
+        self.last_offset = None
+        self.same_offset_count = 0
+
+    def extract_offset(self, packet_url: str) -> int:
+        if not packet_url:
+            return None
+        try:
+            query = urlparse(packet_url).query
+            if not query:
+                return None
+            offsets = parse_qs(query).get("offset")
+            if not offsets:
+                return None
+            offset_str = offsets[0]
+            if offset_str in {None, ""}:
+                return None
+            return int(offset_str)
+        except Exception as e:
+            logger.warn(f"  × Failed to parse offset: {e}")
+            return None
+
+    def is_listing_end(self, item_count: int, packet_url: str) -> bool:
+        if item_count < 15:
+            self.reset_offset_state()
+            return True
+
+        offset = self.extract_offset(packet_url)
+        if offset is None:
+            self.reset_offset_state()
+            return False
+
+        if offset == self.last_offset:
+            self.same_offset_count += 1
+        else:
+            self.last_offset = offset
+            self.same_offset_count = 1
+
+        if self.same_offset_count >= 3:
+            self.reset_offset_state()
+            return True
+
+        return False
 
     def collect_packets(self, tab: ChromiumTab, initial_wait: float) -> list:
         packets: list = []
@@ -390,6 +437,7 @@ class BlinkitCategoryScraper:
 
         products_data = []
         last_action = "navigate"
+        self.reset_offset_state()
 
         while True:
             initial_wait = (
@@ -423,7 +471,9 @@ class BlinkitCategoryScraper:
                         item_count = len(resp_data)
                         logger.mesg(f"+ Extracted {item_count} items")
                         products_data.extend(resp_data)
-                        if item_count < 15:
+                        if self.is_listing_end(
+                            item_count=item_count, packet_url=packet_url
+                        ):
                             tab.stop_loading()
                             return products_data
                         should_scroll = True
