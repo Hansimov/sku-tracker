@@ -1,3 +1,4 @@
+import argparse
 import json
 import pandas as pd
 import re
@@ -6,15 +7,14 @@ from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from time import sleep, monotonic
-from tclogger import logger, logstr, brk, get_now_str
-from tclogger import dict_get
+from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
 from typing import Literal
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_TRAVERSER_SETTING
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
 from web.browser import BrowserClient
-from web.fetch import fetch_with_retry
 from web.constants import norm_date_str
+from cli.arg import TraverserArgParser
 
 WEBSITE_NAME = "blinkit"
 BLINKIT_CATEG_URL = "https://blinkit.com/categories"
@@ -414,12 +414,14 @@ class BlinkitCategoryScraper:
 
                 if packet_url.startswith(BLINKIT_LISTING_URL):
                     listing_packets_found = True
-                    logger.okay(f"  + Listing packet captured: {packet_url_str}")
+                    logger.okay(
+                        f"  + Listing packet captured: {packet_url_str}", end=" "
+                    )
                     resp = packet.response
                     if resp:
                         resp_data = self.extractor.extract(resp.body)
                         item_count = len(resp_data)
-                        logger.mesg(f"    * Extracted {item_count} items")
+                        logger.mesg(f"+ Extracted {item_count} items")
                         products_data.extend(resp_data)
                         if item_count < 15:
                             tab.stop_loading()
@@ -465,9 +467,6 @@ class BlinkitCategoryScraper:
         products = dict_get(json_data, "products", []) or []
         items_count = len(products)
         if items_count > 0 and items_count % 15 == 0:
-            logger.warn(
-                f"  ? Items count {logstr.mesg(items_count)} is 15x, may be incomplete"
-            )
             return "incomplete"
         return "exists"
 
@@ -513,10 +512,11 @@ class BlinkitCategoryScraper:
                 if json_status == "exists":
                     # self.skip_json(json_path)
                     continue
-                sctx.log_info()
                 if json_status == "incomplete":
-                    raise_breakpoint()
+                    # logger.warn(f"  ? Items count is 15x, may be incomplete")
+                    # raise_breakpoint()
                     continue
+                sctx.log_info()
                 # not_exists/incomplete: scrape and save
                 self.process_context(cctx=cctx, sctx=sctx)
                 self.wait_next(8)
@@ -599,7 +599,7 @@ class BlinkitSummarizer:
         return {col: data.get(col, None) for col in CATEG_COLUMNS}
 
     def run(self):
-        for location_idx, location_item in enumerate(self.locations[:1]):
+        for location_idx, location_item in enumerate(self.locations[:]):
             location = location_item.get("name", "")
             iterator = BlinkitCategoryIterator(
                 date_str=self.date_str, location=location
@@ -634,18 +634,24 @@ class BlinkitSummarizer:
             print(df)
 
 
-def test_traverser():
-    traverser = BlinkitTraverser(skip_exists=True, date_str=None)
-    traverser.run()
+def main(args: argparse.Namespace):
+    if args.traverse:
+        traverser = BlinkitTraverser(skip_exists=True, date_str=args.date)
+        traverser.run()
 
-
-def test_summarizer():
-    summarizer = BlinkitSummarizer(date_str=None)
-    summarizer.run()
+    if args.summarize:
+        summarizer = BlinkitSummarizer(date_str=args.date)
+        summarizer.run()
 
 
 if __name__ == "__main__":
-    test_traverser()
-    # test_summarizer()
+    arg_parser = TraverserArgParser()
+    args = arg_parser.parse_args()
+    with Runtimer():
+        main(args)
 
-    # python -m web.blinkit.traverser
+    # Case 1: traverse, scrape, save
+    # python -m web.blinkit.traverser -s
+
+    # Case 2: summarize
+    # python -m web.blinkit.traverser -e

@@ -27,3 +27,26 @@ class BatcherArgParser(argparse.ArgumentParser):
             else:
                 return False
         return True
+
+
+class TraverserArgParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.add_argument("-s", "--traverse", action="store_true")
+        self.add_argument("-e", "--summarize", action="store_true")
+        self.add_argument("-d", "--date", type=str, default=None)
+
+    def parse_args(self):
+        self.args, self.unknown_args = self.parse_known_args(sys.argv[1:])
+        self.check_args()
+        return self.args
+
+    def check_args(self, raise_error: bool = True) -> bool:
+        if not (self.args.traverse or self.args.summarize):
+            err_mesg = "No valid argument: `-s` for traverse or `-e` for summarize."
+            logger.warn(err_mesg)
+            if raise_error:
+                raise ValueError(err_mesg)
+            else:
+                return False
+        return True
