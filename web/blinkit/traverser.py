@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from time import sleep
+from time import sleep, monotonic
 from tclogger import logger, logstr, brk, get_now_str
 from tclogger import dict_get
 from typing import Literal
@@ -228,7 +228,8 @@ class BlinkitListingScroller:
             js_res = tab.run_js(self.scroll_js, as_expr=True)
         except Exception as e:
             logger.warn(f"  × Scroll JS failed: {e}")
-            return False
+            raise e
+            # return False
         if isinstance(js_res, dict) and js_res.get("ok"):
             return True
         else:
@@ -347,11 +348,33 @@ class BlinkitCategoryIterator:
 
 
 class BlinkitCategoryScraper:
+    LISTEN_INITIAL_TIMEOUT = 30
+    LISTEN_POLL_INTERVAL = 0.5
+    LISTEN_DRAIN_TIMEOUT = 0.5
+
     def __init__(self, client: BrowserClient, date_str: str = None):
         self.client = client
         self.date_str = norm_date_str(date_str)
         self.extractor = BlinkitListingExtractor()
         self.scroller = BlinkitListingScroller()
+
+    def collect_packets(self, tab: ChromiumTab, initial_wait: float) -> list:
+        packets: list = []
+        deadline = monotonic() + initial_wait
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            current_timeout = min(self.LISTEN_POLL_INTERVAL, remaining)
+            found_packet = False
+            for packet in tab.listen.steps(timeout=current_timeout):
+                packets.append(packet)
+                found_packet = True
+            if found_packet:
+                deadline = monotonic() + self.LISTEN_DRAIN_TIMEOUT
+            elif packets:
+                break
+        return packets
 
     def scrape(self, url: str) -> list:
         tab = self.client.browser.latest_tab
@@ -366,34 +389,59 @@ class BlinkitCategoryScraper:
             logger.file(f"    * {target}")
 
         products_data = []
-        for packet in tab.listen.steps(timeout=30):
-            packet_url = packet.url
-            if len(packet_url) >= 70:
-                packet_url_parts = packet_url.split("&")
-                packet_url_str = "&".join(packet_url_parts[:2])
-            else:
-                packet_url_str = packet_url
-            packet_url_str = logstr.file(brk(packet_url_str))
-            if packet_url.startswith(BLINKIT_LISTING_URL):
-                logger.okay(f"  + Listing packet captured: {packet_url_str}")
-                resp = packet.response
-                if resp:
-                    resp_data = self.extractor.extract(resp.body)
-                    item_count = len(resp_data)
-                    logger.mesg(f"    * Extracted {item_count} items")
-                    products_data.extend(resp_data)
-                    if item_count < 15:
-                        tab.stop_loading()
-                        break
-                    else:
-                        scroll_res = self.scroller.scroll(tab)
-                        if not scroll_res:
-                            logger.warn("  × Unable to scroll listing container")
-                            break
-                        else:
-                            sleep(3)
-            else:
-                logger.warn(f"  × Unexpected packet: {packet_url_str}")
+        last_action = "navigate"
+
+        while True:
+            initial_wait = (
+                self.LISTEN_INITIAL_TIMEOUT
+                if last_action in {"navigate", "scroll"}
+                else self.LISTEN_DRAIN_TIMEOUT
+            )
+            packets = self.collect_packets(tab, initial_wait)
+            if not packets:
+                break
+
+            listing_packets_found = False
+            should_scroll = False
+            for packet in packets:
+                packet_url = packet.url
+                if len(packet_url) >= 70:
+                    packet_url_parts = packet_url.split("&")
+                    packet_url_str = "&".join(packet_url_parts[:2])
+                else:
+                    packet_url_str = packet_url
+                packet_url_str = logstr.file(brk(packet_url_str))
+
+                if packet_url.startswith(BLINKIT_LISTING_URL):
+                    listing_packets_found = True
+                    logger.okay(f"  + Listing packet captured: {packet_url_str}")
+                    resp = packet.response
+                    if resp:
+                        resp_data = self.extractor.extract(resp.body)
+                        item_count = len(resp_data)
+                        logger.mesg(f"    * Extracted {item_count} items")
+                        products_data.extend(resp_data)
+                        if item_count < 15:
+                            tab.stop_loading()
+                            return products_data
+                        should_scroll = True
+                else:
+                    logger.warn(f"  × Unexpected packet: {packet_url_str}")
+
+            if not listing_packets_found:
+                last_action = "idle"
+                continue
+
+            if not should_scroll:
+                break
+
+            scroll_res = self.scroller.scroll(tab)
+            last_action = "scroll"
+            if not scroll_res:
+                logger.warn("  × Unable to scroll listing container")
+                break
+            sleep(3)
+
         return products_data
 
     def skip_json(self, json_path: Path):
