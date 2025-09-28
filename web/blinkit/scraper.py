@@ -82,6 +82,13 @@ class BlinkitLocationSwitcher:
         self.locations = locations or BLINKIT_LOCATIONS
         self.checker = BlinkitLocationChecker()
         self.client = BrowserClient(**self.client_settings)
+        self.current_location_idx = None
+
+    def is_at_idx(self, location_idx: int) -> bool:
+        return (
+            self.current_location_idx is not None
+            and self.current_location_idx == location_idx
+        )
 
     def set_location(self, location_idx: int = 0) -> dict:
         self.client.start_client()
@@ -122,6 +129,7 @@ class BlinkitLocationSwitcher:
             self.clicker.click_target_position()
             sleep(10)
 
+        self.current_location_idx = location_idx
         # self.client.close_other_tabs(create_new_tab=True)
         self.client.stop_client(close_browser=False)
 

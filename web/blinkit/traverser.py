@@ -34,8 +34,12 @@ def get_summary_root(date_str: str = None) -> Path:
     return DATA_ROOT / "summaries" / norm_date_str(date_str) / WEBSITE_NAME
 
 
-def get_categ_dump_path(date_str: str = None) -> Path:
-    return get_dump_root(date_str) / "categories.json"
+def get_categ_dump_path(date_str: str = None, location: str = None) -> Path:
+    dump_root = get_dump_root(date_str)
+    path_parts = ["categories.json"]
+    if location:
+        path_parts = [location] + path_parts
+    return dump_root.joinpath(*path_parts)
 
 
 def norm_name(name: str) -> str:
@@ -109,11 +113,13 @@ class BlinkitCategoriesExtractor:
 
 
 class BlinkitCategoriesFetcher:
-    def __init__(self, client: BrowserClient, date_str: str = None):
+    def __init__(
+        self, client: BrowserClient, date_str: str = None, location: str = None
+    ):
         self.client = client
         self.date_str = norm_date_str(date_str)
         self.extractor = BlinkitCategoriesExtractor(client=client, verbose=True)
-        self.dump_path = get_categ_dump_path(self.date_str)
+        self.location = location
 
     def get_cookies(self, tab: ChromiumTab) -> dict:
         cookies_dict = tab.cookies(all_info=True).as_dict()
@@ -167,6 +173,7 @@ class BlinkitCategoriesFetcher:
         return categ_data
 
     def dump(self, resp: dict):
+        self.dump_path = get_categ_dump_path(self.date_str, location=self.location)
         logger.note(f"  > Dump categories data to json:", end=" ")
         self.dump_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.dump_path, "w", encoding="utf-8") as wf:
@@ -302,7 +309,9 @@ class BlinkitCategoryIterator:
         self.load_categories()
 
     def load_categories(self) -> list[dict]:
-        self.categ_path = get_categ_dump_path(self.date_str)
+        self.categ_path = get_categ_dump_path(
+            date_str=self.date_str, location=self.location
+        )
         if not self.categ_path.exists():
             return []
         with open(self.categ_path, "r", encoding="utf-8") as rf:
@@ -361,9 +370,17 @@ class BlinkitCategoryScraper:
     LISTEN_POLL_INTERVAL = 0.5
     LISTEN_DRAIN_TIMEOUT = 0.5
 
-    def __init__(self, client: BrowserClient, date_str: str = None):
+    def __init__(
+        self,
+        client: BrowserClient,
+        switcher: BlinkitLocationSwitcher,
+        date_str: str = None,
+        location: str = None,
+    ):
         self.client = client
+        self.switcher = switcher
         self.date_str = norm_date_str(date_str)
+        self.location = location
         self.extractor = BlinkitListingExtractor()
         self.scroller = BlinkitListingScroller()
         self.last_offset: int = None
@@ -540,6 +557,7 @@ class BlinkitCategoryScraper:
             "url": sctx.url,
             "cid": cctx.cid,
             "sid": sctx.sid,
+            "location": self.location,
             "count": len(products_data),
             "products": products_data,
         }
@@ -559,8 +577,11 @@ class BlinkitCategoryScraper:
         logger.note(f"  > Waiting {seconds}s for next ...")
         sleep(seconds)
 
-    def run(self, location: str = None):
-        iterator = BlinkitCategoryIterator(date_str=self.date_str, location=location)
+    def run(self, location: str = None, location_idx: int = 0):
+        self.location = location or self.location
+        iterator = BlinkitCategoryIterator(
+            date_str=self.date_str, location=self.location
+        )
         self.client.start_client()
         for cctx in iterator:
             cctx.log_info()
@@ -576,6 +597,8 @@ class BlinkitCategoryScraper:
                     continue
                 sctx.log_info()
                 # not_exists/incomplete: scrape and save
+                if not self.switcher.is_at_idx(location_idx):
+                    self.switcher.set_location(location_idx)
                 self.process_context(cctx=cctx, sctx=sctx)
                 self.wait_next(8)
                 # raise_breakpoint()
@@ -603,26 +626,28 @@ class BlinkitTraverser:
             client=self.client, date_str=self.date_str
         )
         self.scraper = BlinkitCategoryScraper(
-            client=self.client, date_str=self.date_str
+            client=self.client, switcher=self.switcher, date_str=self.date_str
         )
 
     def run(self):
         for location_idx, location_item in enumerate(self.locations[:]):
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
-            is_set_location = False
-            categ_path = self.fetcher.dump_path
+            self.fetcher.location = location_name
+            logger.hint(f"> Location: {location_name} - {location_text}")
+            categ_path = get_categ_dump_path(
+                date_str=self.date_str, location=location_name
+            )
             if self.skip_exists and categ_path.exists():
                 logger.mesg(
                     f"> Skip fetch existed categories: {logstr.file(brk(categ_path))}"
                 )
             else:
-                if not is_set_location:
+                if not self.switcher.is_at_idx(location_idx):
                     logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)
-                    is_set_location = True
                 self.fetcher.run()
-            self.scraper.run(location=location_name)
+            self.scraper.run(location=location_name, location_idx=location_idx)
 
 
 CATEG_COLUMNS = ["categ", "sub_categ", "url", "cid", "sid"]
