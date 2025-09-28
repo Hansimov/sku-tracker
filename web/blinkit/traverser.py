@@ -30,8 +30,16 @@ def get_dump_root(date_str: str = None) -> Path:
     return DATA_ROOT / "traverses" / norm_date_str(date_str) / WEBSITE_NAME
 
 
+def get_summary_root(date_str: str = None) -> Path:
+    return DATA_ROOT / "summaries" / norm_date_str(date_str) / WEBSITE_NAME
+
+
 def get_categ_dump_path(date_str: str = None) -> Path:
     return get_dump_root(date_str) / "categories.json"
+
+
+def norm_name(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
 
 
 def load_json(json_path: Path) -> dict:
@@ -309,7 +317,7 @@ class BlinkitCategoryIterator:
         return self.dump_root.joinpath(*parts)
 
     def get_sub_categ_url(self, name: str, cid: int, sid: int) -> str:
-        mark = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
+        mark = norm_name(name)
         return f"https://blinkit.com/cn/{mark}/cid/{cid}/{sid}"
 
     def __iter__(self):
@@ -452,7 +460,7 @@ class BlinkitCategoryScraper:
             listing_packets_found = False
             should_scroll = False
             for packet in packets:
-                packet_url = packet.url
+                packet_url: str = packet.url
                 if len(packet_url) >= 70:
                     packet_url_parts = packet_url.split("&")
                     packet_url_str = "&".join(packet_url_parts[:2])
@@ -527,9 +535,9 @@ class BlinkitCategoryScraper:
         products_data: list[dict],
     ) -> dict:
         save_data = {
-            "url": sctx.url,
             "categ": cctx.cname,
             "sub_categ": sctx.sname,
+            "url": sctx.url,
             "cid": cctx.cid,
             "sid": sctx.sid,
             "count": len(products_data),
@@ -599,7 +607,7 @@ class BlinkitTraverser:
         )
 
     def run(self):
-        for location_idx, location_item in enumerate(self.locations[:1]):
+        for location_idx, location_item in enumerate(self.locations[:]):
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
             is_set_location = False
@@ -617,7 +625,7 @@ class BlinkitTraverser:
             self.scraper.run(location=location_name)
 
 
-CATEG_COLUMNS = ["url", "categ", "sub_categ", "cid", "sid"]
+CATEG_COLUMNS = ["categ", "sub_categ", "url", "cid", "sid"]
 PRODUCT_COLUMNS = [
     "product_name",
     "brand",
@@ -629,27 +637,57 @@ PRODUCT_COLUMNS = [
     "product_state",
 ]
 DF_INT_COLUMNS = ["cid", "sid", "product_id", "price", "mrp", "inventory"]
+COLUMN_RENAMES = {
+    "url": "categ_url",
+}
 
 
 class BlinkitSummarizer:
-    def __init__(
-        self,
-        date_str: str = None,
-        locations: list = None,
-    ):
+    def __init__(self, date_str: str = None, locations: list = None):
         self.date_str = norm_date_str(date_str)
         self.locations = locations or BLINKIT_LOCATIONS
+        self.summary_root = get_summary_root(date_str)
 
     def product_dict_to_row(self, product: dict) -> dict:
         if product.get("product_id") is None and product.get("product_name") is None:
             return {}
-        return {col: product.get(col, None) for col in PRODUCT_COLUMNS}
+        row = {col: product.get(col, None) for col in PRODUCT_COLUMNS}
+        product_name = row.get("product_name", "")
+        product_id = row.get("product_id", None)
+        if product_name and product_id:
+            product_mark = norm_name(product_name)
+            product_link = f"https://blinkit.com/prn/{product_mark}/prid/{product_id}"
+        else:
+            product_link = None
+        row["product_link"] = product_link
+        return row
 
     def categ_dict_to_row(self, data: dict) -> dict:
         return {col: data.get(col, None) for col in CATEG_COLUMNS}
 
+    def rows_to_df(self, rows: list[dict]) -> pd.DataFrame:
+        df = pd.DataFrame(rows)
+        for col in DF_INT_COLUMNS:
+            if col not in df.columns:
+                continue
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+        if not df.empty:
+            df = df.drop_duplicates(ignore_index=True)
+        df = df.rename(columns=COLUMN_RENAMES)
+        print(df)
+        return df
+
+    def save_to_excel(self, df: pd.DataFrame, location: str):
+        sheet_name = f"{self.date_str}_{WEBSITE_NAME}_{location}"
+        summary_name = f"summary_{sheet_name}.xlsx"
+        summary_path = self.summary_root / summary_name
+        logger.note(f"> Save summary to excel:")
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_excel(summary_path, sheet_name=sheet_name, index=False, engine="openpyxl")
+        logger.okay(f"  * {brk(summary_path)}")
+
     def run(self):
-        for location_idx, location_item in enumerate(self.locations[:]):
+        for location_idx, location_item in enumerate(self.locations[:1]):
             location = location_item.get("name", "")
             iterator = BlinkitCategoryIterator(
                 date_str=self.date_str, location=location
@@ -676,12 +714,8 @@ class BlinkitSummarizer:
                         }
                         df_rows.append(df_row)
                     rows.extend(df_rows)
-            df = pd.DataFrame(rows)
-            for col in DF_INT_COLUMNS:
-                if col not in df.columns:
-                    continue
-                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-            print(df)
+            df = self.rows_to_df(rows)
+            self.save_to_excel(df, location)
 
 
 def main(args: argparse.Namespace):
