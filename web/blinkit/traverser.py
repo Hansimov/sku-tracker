@@ -2,7 +2,6 @@ import argparse
 import json
 import pandas as pd
 import re
-from urllib.parse import parse_qs, urlparse
 
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
@@ -10,6 +9,7 @@ from pathlib import Path
 from time import sleep, monotonic
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
 from typing import Literal
+from urllib.parse import parse_qs, urlparse
 
 from configs.envs import DATA_ROOT, BLINKIT_LOCATIONS, BLINKIT_TRAVERSER_SETTING
 from web.blinkit.scraper import BlinkitLocationChecker, BlinkitLocationSwitcher
@@ -644,7 +644,6 @@ class BlinkitTraverser:
                 )
             else:
                 if not self.switcher.is_at_idx(location_idx):
-                    logger.hint(f"> New Location: {location_name} ({location_text})")
                     self.switcher.set_location(location_idx)
                 self.fetcher.run()
             self.scraper.run(location=location_name, location_idx=location_idx)
@@ -671,7 +670,7 @@ class BlinkitSummarizer:
     def __init__(self, date_str: str = None, locations: list = None):
         self.date_str = norm_date_str(date_str)
         self.locations = locations or BLINKIT_LOCATIONS
-        self.summary_root = get_summary_root(date_str)
+        self.summary_root = get_summary_root(self.date_str)
 
     def product_dict_to_row(self, product: dict) -> dict:
         if product.get("product_id") is None and product.get("product_name") is None:
@@ -690,6 +689,30 @@ class BlinkitSummarizer:
     def categ_dict_to_row(self, data: dict) -> dict:
         return {col: data.get(col, None) for col in CATEG_COLUMNS}
 
+    def get_rows_from_context(
+        self, sctx: BlinkitSubCategoryContext, location: str
+    ) -> list[dict]:
+        json_path = sctx.json_path
+        if not json_path.exists():
+            logger.warn(f"  × JSON not exists: {logstr.file(brk(json_path))}")
+            return []
+        json_data = load_json(json_path)
+        categ_row = self.categ_dict_to_row(json_data)
+        products = dict_get(json_data, "products", []) or []
+        product_rows = [self.product_dict_to_row(product) for product in products]
+        rows = []
+        for product_row in product_rows:
+            if not product_row:
+                continue
+            row = {
+                "date": self.date_str,
+                "location": location,
+                **categ_row,
+                **product_row,
+            }
+            rows.append(row)
+        return rows
+
     def rows_to_df(self, rows: list[dict]) -> pd.DataFrame:
         df = pd.DataFrame(rows)
         for col in DF_INT_COLUMNS:
@@ -702,45 +725,51 @@ class BlinkitSummarizer:
         print(df)
         return df
 
-    def save_to_excel(self, df: pd.DataFrame, location: str):
-        sheet_name = f"{self.date_str}_{WEBSITE_NAME}_{location}"
-        summary_name = f"summary_{sheet_name}.xlsx"
-        summary_path = self.summary_root / summary_name
-        logger.note(f"> Save summary to excel:")
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_excel(summary_path, sheet_name=sheet_name, index=False, engine="openpyxl")
-        logger.okay(f"  * {brk(summary_path)}")
+    def get_xlsx_sheet_name(self, location: str) -> tuple[Path, str]:
+        return f"{self.date_str}_{WEBSITE_NAME}_{location}"
+
+    def save_df_to_xlsx(self, df: pd.DataFrame, location: str):
+        sheet_name = self.get_xlsx_sheet_name(location)
+        xlsx_name = f"summary_{sheet_name}.xlsx"
+        xlsx_path = self.summary_root / xlsx_name
+        logger.note(f"> Save summary to xslx:")
+        xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_excel(xlsx_path, sheet_name=sheet_name, index=False, engine="openpyxl")
+        logger.okay(f"  * {brk(xlsx_path)}")
+
+    def save_dfs_to_xlsx(self, df_locs: list[tuple[pd.DataFrame, str]]):
+        xlsx_name = f"summary_{self.date_str}_{WEBSITE_NAME}.xlsx"
+        xlsx_root = self.summary_root.parent
+        xlsx_path = xlsx_root / xlsx_name
+        logger.note(f"> Save combined summary to xslx:")
+        with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+            for df, location in df_locs:
+                sheet_name = self.get_xlsx_sheet_name(location)
+                df.to_excel(
+                    writer, sheet_name=sheet_name, index=False, engine="openpyxl"
+                )
+        logger.okay(f"  * {brk(xlsx_path)}")
 
     def run(self):
-        for location_idx, location_item in enumerate(self.locations[:1]):
+        df_locs: list[tuple[pd.DataFrame, str]] = []
+        for location_idx, location_item in enumerate(self.locations[:]):
             location = location_item.get("name", "")
+            location_text = location_item.get("text", "")
+            logger.hint(f"> Location: {location} - {location_text}")
             iterator = BlinkitCategoryIterator(
                 date_str=self.date_str, location=location
             )
             rows: list[dict] = []
             for cctx in iterator:
-                cctx.log_info()
                 for sctx in cctx.sctxs:
-                    json_data = load_json(sctx.json_path)
-                    categ_row = self.categ_dict_to_row(json_data)
-                    products = dict_get(json_data, "products", []) or []
-                    product_rows = [
-                        self.product_dict_to_row(product) for product in products
-                    ]
-                    df_rows = []
-                    for product_row in product_rows:
-                        if not product_row:
-                            continue
-                        df_row = {
-                            "date": self.date_str,
-                            "location": location,
-                            **categ_row,
-                            **product_row,
-                        }
-                        df_rows.append(df_row)
-                    rows.extend(df_rows)
+                    sctx_rows = self.get_rows_from_context(sctx=sctx, location=location)
+                    rows.extend(sctx_rows)
             df = self.rows_to_df(rows)
-            self.save_to_excel(df, location)
+            df_locs.append((df, location))
+
+        for df, location in df_locs:
+            self.save_df_to_xlsx(df, location)
+        self.save_dfs_to_xlsx(df_locs)
 
 
 def main(args: argparse.Namespace):
