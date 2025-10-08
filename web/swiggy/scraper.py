@@ -19,8 +19,11 @@ SWIGGY_ITEM_URL = "https://www.swiggy.com/stores/instamart/item"
 
 
 class SwiggyLocationChecker:
+    def __init__(self, locations: list = None):
+        self.locations = locations or SWIGGY_LOCATIONS
+
     def get_correct_address(self, location_idx: int) -> str:
-        return SWIGGY_LOCATIONS[location_idx].get("text", "")
+        return self.locations[location_idx].get("text", "")
 
     def unify_address(self, address: str) -> str:
         if address:
@@ -79,9 +82,18 @@ class SwiggyLocationChecker:
 
 
 class SwiggyLocationSwitcher:
-    def __init__(self):
+    def __init__(self, client_settings: dict = None, locations: list = None):
+        self.client_settings = client_settings or SWIGGY_BROWSER_SETTING
+        self.locations = locations or SWIGGY_LOCATIONS
         self.checker = SwiggyLocationChecker()
-        self.client = BrowserClient(**SWIGGY_BROWSER_SETTING)
+        self.client = BrowserClient(**self.client_settings)
+        self.current_location_idx = None
+
+    def is_at_idx(self, location_idx: int) -> bool:
+        return (
+            self.current_location_idx is not None
+            and self.current_location_idx == location_idx
+        )
 
     def set_location(self, location_idx: int = 0) -> dict:
         logger.note(f"> Visiting main page: {logstr.mesg(brk(SWIGGY_MAIN_URL))}")
@@ -99,7 +111,7 @@ class SwiggyLocationSwitcher:
         else:
             self.clicker = SwiggyLocationClicker(tab=tab, suffix=WEBSITE_NAME)
             logger.note(f"> Setting location:")
-            location_dict = SWIGGY_LOCATIONS[location_idx]
+            location_dict = self.locations[location_idx]
             location_name = location_dict.get("name", "")
             location_text = location_dict.get("text", "")
             location_shot = location_dict.get("shot", "")
@@ -117,6 +129,7 @@ class SwiggyLocationSwitcher:
 
             sleep(10)
 
+        self.current_location_idx = location_idx
         # self.client.close_other_tabs(create_new_tab=True)
         self.client.stop_client(close_browser=False)
 
