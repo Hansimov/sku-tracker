@@ -20,6 +20,7 @@ from cli.arg import TraverserArgParser
 
 
 WEBSITE_NAME = "swiggy"
+SWIGGY_URL = "https://www.swiggy.com"
 SWIGGY_CATEG_URL = "https://www.swiggy.com/instamart"
 SWIGGY_API_HOME_URL = "https://www.swiggy.com/api/instamart/home/v2\?.*"
 
@@ -45,6 +46,47 @@ class SwiggyCategoriesExtractor:
         self.client = client
         self.verbose = verbose
 
+    def extract_main_info_from_card(self, card: dict) -> dict:
+        main_info = {
+            "id": dict_get(card, "id", None),
+            "name": dict_get(card, "header.title", None),
+        }
+        logger.mesg(main_info, indent=4)
+        return main_info
+
+    def extract_items_info_from_card(self, card: dict) -> list[dict]:
+        items_info = []
+        items = dict_get(card, "gridElements.infoWithStyle.info", [])
+        for item in items:
+            link = dict_get(item, "action.link", None)
+            if link:
+                link = link.replace("swiggy://stores", SWIGGY_URL)
+                link = link.replace(" ", "+")
+            item_info = {
+                "id": dict_get(item, "id", None),
+                "name": dict_get(item, "description", None),
+                "link": link,
+                # "widgetId": dict_get(item, "analytics.extraFields.widgetId", None),
+            }
+            items_info.append(item_info)
+        return items_info
+
+    def should_skip_main(self, main_info: dict):
+        return dict_get(main_info, "name", "").lower().startswith("best from noice")
+
+    def extract_categories_from_json(self, categ_json: dict) -> list[dict]:
+        cards = dict_get(categ_json, "data.cards", [])
+        res = []
+        for card in cards:
+            card = dict_get(card, "card.card", {})
+            main_info = self.extract_main_info_from_card(card)
+            if self.should_skip_main(main_info):
+                continue
+            items_info = self.extract_items_info_from_card(card)
+            card_info = {**main_info, "subCategories": items_info}
+            res.append(card_info)
+        return res
+
     def extract(self, categ_json: dict) -> dict:
         logger.enter_quiet(not self.verbose)
         if not categ_json:
@@ -52,7 +94,7 @@ class SwiggyCategoriesExtractor:
             logger.exit_quiet(not self.verbose)
             return {}
         categ_data = {}
-        categories = dict_get(categ_json, "data.cards", [])
+        categories = self.extract_categories_from_json(categ_json)
         if categories:
             categ_data = {"categories": categories, "count": len(categories)}
         else:
