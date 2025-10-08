@@ -6,10 +6,10 @@ import re
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
-from time import sleep, monotonic
+from time import sleep
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
 from typing import Literal
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS, SWIGGY_TRAVERSER_SETTING
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
@@ -23,6 +23,10 @@ WEBSITE_NAME = "swiggy"
 SWIGGY_URL = "https://www.swiggy.com"
 SWIGGY_CATEG_URL = "https://www.swiggy.com/instamart"
 SWIGGY_API_HOME_URL = "https://www.swiggy.com/api/instamart/home/v2\?.*"
+SWIGGY_API_LISTING_URL = "https://www.swiggy.com/api/instamart/category-listing"
+SWIGGY_API_FILTER_URL = (
+    "https://www.swiggy.com/api/instamart/category-listing/filter\?.*"
+)
 
 
 def get_dump_root(date_str: str = None) -> Path:
@@ -179,67 +183,56 @@ class SwiggyCategoriesFetcher:
 
 
 class SwiggyListingExtractor:
-    def snippet_to_dict(self, snippet: dict) -> dict:
-        data = dict_get(snippet, "data", {})
-        atc = dict_get(data, "atc_action.add_to_cart.cart_item", {})
-        snippet_dict = {
-            "product_id": dict_get(atc, "product_id", None),
-            "product_name": dict_get(atc, "product_name", None),
-            "quantity": dict_get(atc, "quantity", None),
-            "price": dict_get(atc, "price", None),
-            "mrp": dict_get(atc, "mrp", None),
-            "unit": dict_get(atc, "unit", None),
-            "inventory": dict_get(atc, "inventory", None),
-            "group_id": dict_get(atc, "group_id", None),
-            "brand": dict_get(atc, "brand", None),
-            "is_sold_out": dict_get(data, "is_sold_out", None),
-            "product_state": dict_get(data, "product_state", None),
+    def select_variation(self, variations: list[dict]) -> dict:
+        if not variations:
+            return {}
+        if len(variations) == 1:
+            return variations[0]
+        for variation in variations:
+            if dict_get(variation, "listing_variant", None):
+                return variation
+        return variations[0]
+
+    def item_to_dict(self, item: dict) -> dict:
+        variations = dict_get(item, "variations", []) or []
+        variant = self.select_variation(variations) or {}
+        item_info = {
+            "product_id": dict_get(item, "product_id", None),
+            # "product_id": dict_get(variant, "id", None),
+            "product_name": dict_get(item, "display_name", None),
+            "quantity": dict_get(variant, "cart_allowed_quantity.total", None),
+            "price": dict_get(variant, "price.offer_price", None),
+            "mrp": dict_get(variant, "price.mrp", None),
+            "unit": dict_get(variant, "sku_quantity_with_combo", None),
+            # "in_stock": dict_get(variant, "inventory.in_stock", None),
+            "in_stock": dict_get(item, "in_stock", None),
+            "brand": dict_get(variant, "brand", None),
+            "sourced_from": dict_get(variant, "sourced_from", None),
+            "super_category": dict_get(variant, "super_category", None),
         }
-        return snippet_dict
+        return item_info
 
     def extract(self, resp: dict) -> list[dict]:
         res = []
-        snippets = dict_get(resp, "response.snippets") or []
-        for snippet in snippets:
-            snippet_dict = self.snippet_to_dict(snippet)
-            res.append(snippet_dict)
+        widgets = dict_get(resp, "data.widgets") or []
+        widgets_data = []
+        for widget in widgets:
+            widget_type = dict_get(widget, "widgetInfo.widgetType", "")
+            if widget_type.lower() == "text_widget":
+                title = dict_get(widget, "widgetInfo.title", "")
+                logger.okay(f"  * {title}")
+                continue
+            if widget_type.lower() == "product_list":
+                widgets_data = dict_get(widget, "data", [])
+        if not widgets_data:
+            logger.warn("  × No products data extracted")
+            return []
+        for item in widgets_data:
+            item_dict = self.item_to_dict(item)
+            res.append(item_dict)
+            print(item_dict)
+            raise_breakpoint()
         return res
-
-
-class SwiggyListingScroller:
-    def __init__(self):
-        self.scroll_js = """
-        (async () => {
-            const container = document.querySelector('#plpContainer');
-            if (!container) {
-                return { ok: false, reason: 'container-not-found' };
-            }
-            // scroll up
-            const topBeforeUp = container.scrollTop;
-            container.scrollTop = Math.max(topBeforeUp - 100, 0);
-            // sleep to ensure scroll up completed
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            // scroll down
-            const topBeforeDown = container.scrollTop;
-            const maxScroll = Math.max(container.scrollHeight - container.clientHeight, 0);
-            container.scrollTop = maxScroll;
-            return { ok: true };
-        })()
-        """
-
-    def scroll(self, tab: ChromiumTab) -> bool:
-        try:
-            logger.note(f"  > Scrolling listing container ...")
-            js_res = tab.run_js(self.scroll_js, as_expr=True)
-        except Exception as e:
-            logger.warn(f"  × Scroll JS failed: {e}")
-            raise e
-            # return False
-        if isinstance(js_res, dict) and js_res.get("ok"):
-            return True
-        else:
-            logger.warn(f"  × Scroll JS result: {js_res}")
-            return False
 
 
 @dataclass
@@ -264,8 +257,7 @@ class SwiggySubCategoryContext:
         return f"{self.idx_str()} {self.label_str()}"
 
     def log_info(self):
-        logger.note(f"  * {self.idx_label_str()}:", end=" ")
-        logger.file(f"{self.url}")
+        logger.note(f"  * {self.idx_label_str()}")
 
 
 @dataclass
@@ -329,7 +321,7 @@ class SwiggyCategoryIterator:
             for sidx, sub_categ in enumerate(sub_categs, start=1):
                 sname = sub_categ.get("name", "")
                 sid = sub_categ.get("id", -1)
-                url = self.get_sub_categ_url(sname, cid, sid)
+                url = sub_categ.get("link", None)
                 json_path = self.get_json_path(cid=cid, sid=sid)
                 sctxs.append(
                     SwiggySubCategoryContext(
@@ -371,142 +363,39 @@ class SwiggyCategoryScraper:
         self.date_str = norm_date_str(date_str)
         self.location = location
         self.extractor = SwiggyListingExtractor()
-        self.scroller = SwiggyListingScroller()
         self.last_offset: int = None
         self.same_offset_count: int = 0
 
-    def reset_offset_state(self):
-        self.last_offset = None
-        self.same_offset_count = 0
+    def scrape(self, sctx: SwiggySubCategoryContext) -> list:
+        # https://www.swiggy.com/api/instamart/category-listing?categoryName=Fresh%20Fruits&storeId=1135722&pageNo=0&offset=0&filterName=&primaryStoreId=1135722&secondaryStoreId=1396282&taxonomyType=Speciality%20taxonomy%201
 
-    def extract_offset(self, packet_url: str) -> int:
-        if not packet_url:
-            return None
-        try:
-            query = urlparse(packet_url).query
-            if not query:
-                return None
-            offsets = parse_qs(query).get("offset")
-            if not offsets:
-                return None
-            offset_str = offsets[0]
-            if offset_str in {None, ""}:
-                return None
-            return int(offset_str)
-        except Exception as e:
-            logger.warn(f"  × Failed to parse offset: {e}")
-            return None
-
-    def is_listing_end(self, item_count: int, packet_url: str) -> bool:
-        if item_count < 15:
-            self.reset_offset_state()
-            return True
-
-        offset = self.extract_offset(packet_url)
-        if offset is None:
-            self.reset_offset_state()
-            return False
-
-        if offset == self.last_offset:
-            self.same_offset_count += 1
-        else:
-            self.last_offset = offset
-            self.same_offset_count = 1
-
-        if self.same_offset_count >= 3:
-            self.reset_offset_state()
-            return True
-
-        return False
-
-    def collect_packets(self, tab: ChromiumTab, initial_wait: float) -> list:
-        packets: list = []
-        deadline = monotonic() + initial_wait
-        while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                break
-            current_timeout = min(self.LISTEN_POLL_INTERVAL, remaining)
-            found_packet = False
-            for packet in tab.listen.steps(timeout=current_timeout):
-                packets.append(packet)
-                found_packet = True
-            if found_packet:
-                deadline = monotonic() + self.LISTEN_DRAIN_TIMEOUT
-            elif packets:
-                break
-        return packets
-
-    def scrape(self, url: str) -> list:
         tab = self.client.browser.latest_tab
-        listen_targets = [...]
-        tab.listen.start(targets=listen_targets)
         tab.set.load_mode.none()
-        tab.get(url)
-
-        logger.mesg(f"  ✓ Title: {brk(tab.title)}")
-        logger.note(f"  > Listening targets:")
-        for target in listen_targets:
-            logger.file(f"    * {target}")
 
         products_data = []
-        last_action = "navigate"
-        self.reset_offset_state()
 
-        while True:
-            initial_wait = (
-                self.LISTEN_INITIAL_TIMEOUT
-                if last_action in {"navigate", "scroll"}
-                else self.LISTEN_DRAIN_TIMEOUT
-            )
-            packets = self.collect_packets(tab, initial_wait)
-            if not packets:
-                break
+        url_params = {
+            "categoryName": sctx.sname,
+            "storeId": "1135722",
+            "primaryStoreId": "1135722",
+            "taxonomyType": "Speciality taxonomy 1",
+            "offset": "0",
+        }
 
-            listing_packets_found = False
-            should_scroll = False
-            for packet in packets:
-                packet_url: str = packet.url
-                if len(packet_url) >= 70:
-                    packet_url_parts = packet_url.split("&")
-                    packet_url_str = "&".join(packet_url_parts[:2])
-                else:
-                    packet_url_str = packet_url
-                packet_url_str = logstr.file(brk(packet_url_str))
+        page_no = 0
+        url_params["pageNo"] = str(page_no)
+        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(url_params)}"
+        logger.note(f"  * GET: [{logstr.mesg(sctx.sname)}] Page {logstr.file(page_no)}")
 
-                if packet_url.startswith(...):
-                    listing_packets_found = True
-                    logger.okay(
-                        f"  + Listing packet captured: {packet_url_str}", end=" "
-                    )
-                    resp = packet.response
-                    if resp:
-                        resp_data = self.extractor.extract(resp.body)
-                        item_count = len(resp_data)
-                        logger.mesg(f"+ Extracted {item_count} items")
-                        products_data.extend(resp_data)
-                        if self.is_listing_end(
-                            item_count=item_count, packet_url=packet_url
-                        ):
-                            tab.stop_loading()
-                            return products_data
-                        should_scroll = True
-                else:
-                    logger.warn(f"  × Unexpected packet: {packet_url_str}")
+        tab.get(url)
+        resp_json = tab.json
 
-            if not listing_packets_found:
-                last_action = "idle"
-                continue
-
-            if not should_scroll:
-                break
-
-            scroll_res = self.scroller.scroll(tab)
-            last_action = "scroll"
-            if not scroll_res:
-                logger.warn("  × Unable to scroll listing container")
-                break
+        if resp_json:
+            resp_data = self.extractor.extract(resp_json)
+            products_data.extend(resp_data)
             sleep(3)
+
+        raise_breakpoint()
 
         return products_data
 
@@ -527,11 +416,11 @@ class SwiggyCategoryScraper:
     ) -> Literal["not_exists", "incomplete", "exists"]:
         if not json_path.exists():
             return "not_exists"
-        json_data = load_json(json_path)
-        products = dict_get(json_data, "products", []) or []
-        items_count = len(products)
-        if items_count > 0 and items_count % 15 == 0:
-            return "incomplete"
+        # json_data = load_json(json_path)
+        # products = dict_get(json_data, "products", []) or []
+        # items_count = len(products)
+        # if items_count > 0 and items_count % 15 == 0:
+        #     return "incomplete"
         return "exists"
 
     def construct_save_data(
@@ -556,7 +445,7 @@ class SwiggyCategoryScraper:
         self, cctx: SwiggyCategoryContext, sctx: SwiggySubCategoryContext
     ):
         with logger.temp_indent(2):
-            products_data = self.scrape(sctx.url)
+            products_data = self.scrape(sctx)
             save_data = self.construct_save_data(
                 cctx=cctx, sctx=sctx, products_data=products_data
             )
@@ -578,10 +467,9 @@ class SwiggyCategoryScraper:
                 json_path = sctx.json_path
                 json_status = self.check_json_status(json_path)
                 if json_status == "exists":
-                    # self.skip_json(json_path)
+                    self.skip_json(json_path)
                     continue
                 if json_status == "incomplete":
-                    # logger.warn(f"  ? Items count is 15x, may be incomplete")
                     # raise_breakpoint()
                     continue
                 sctx.log_info()
@@ -635,7 +523,7 @@ class SwiggyTraverser:
                 if not self.switcher.is_at_idx(location_idx):
                     self.switcher.set_location(location_idx)
                 self.fetcher.run()
-            # self.scraper.run(location=location_name, location_idx=location_idx)
+            self.scraper.run(location=location_name, location_idx=location_idx)
 
 
 CATEG_COLUMNS = ["categ", "sub_categ", "url", "cid", "sid"]
@@ -761,7 +649,7 @@ class SwiggySummarizer:
 
 def main(args: argparse.Namespace):
     if args.traverse:
-        traverser = SwiggyTraverser(skip_exists=False, date_str=args.date)
+        traverser = SwiggyTraverser(skip_exists=True, date_str=args.date)
         traverser.run()
 
     if args.summarize:
