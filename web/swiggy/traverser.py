@@ -56,6 +56,22 @@ def get_filters_dump_path(date_str: str = None, location: str = None) -> Path:
     return dump_root.joinpath(*path_parts)
 
 
+def get_url_params(url: str) -> dict:
+    return parse_qs(urlparse(url).query)
+
+
+def get_url_param_value(url: str, key: str) -> str:
+    params = get_url_params(url)
+    values = params.get(key, [])
+    if values:
+        return values[0]
+    return None
+
+
+def urlencode_quote(params: dict) -> str:
+    return urlencode(params, quote_via=quote)
+
+
 class SwiggyCategoriesExtractor:
     def __init__(self, client: BrowserClient, verbose: bool = False):
         self.client = client
@@ -194,7 +210,7 @@ class SwiggyCategoriesFetcher:
 
 
 class SwiggyFiltersExtractor:
-    def extract(self, resp: dict) -> dict:
+    def extract(self, resp: dict, listing_params: dict = {}) -> dict:
         """Return:
         ```json
         {
@@ -215,6 +231,12 @@ class SwiggyFiltersExtractor:
         """
         filter_items = []
         filters = dict_get(resp, "data.filters", []) or []
+        if not filters:
+            print(resp)
+            logger.warn("  × No filters found in response")
+            raise_breakpoint()
+            return {}
+
         categ_info = {
             "categ_id": dict_get(resp, "data.selectedCategoryId", None),
             "categ_name": dict_get(resp, "data.selectedCategoryName", None),
@@ -227,9 +249,9 @@ class SwiggyFiltersExtractor:
                 "offset": 0,
                 "showAgeConsent": False,
                 "storeId": "1135722",
-                "taxonomyType": "Speciality taxonomy 1",
+                "taxonomyType": dict_get(listing_params, "taxonomyType", None),
             }
-            link = f"{SWIGGY_LISTING_URL}?{urlencode(link_params, quote_via=quote)}"
+            link = f"{SWIGGY_LISTING_URL}?{urlencode_quote(link_params)}"
             filter_item = {
                 "id": dict_get(filter_dict, "id", None),
                 "name": dict_get(filter_dict, "name", None),
@@ -245,14 +267,17 @@ class SwiggyFiltersExtractor:
         return res
 
     def save(self, categ_filters: dict, save_path: Path):
-        filters_count = len(categ_filters.get("filters", []))
+        filters_count = len(dict_get(categ_filters, "filters", []))
+        categ_name = dict_get(categ_filters, "categ_name", None)
+        if not categ_name:
+            logger.warn("  × No categ_name found, skip saving")
+            return
         logger.okay(f"  ✓ Save {logstr.mesg(filters_count)} filters to:", end=" ")
         if not save_path.exists():
             save_path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
         else:
             data = load_json(save_path)
-        categ_name = dict_get(categ_filters, "categ_name", None)
         with open(save_path, "w", encoding="utf-8") as wf:
             data[categ_name] = categ_filters
             json.dump(data, wf, ensure_ascii=False, indent=4)
@@ -301,16 +326,14 @@ class SwiggyListingExtractor:
                 continue
             if widget_type.lower() == "product_list":
                 widgets_data = dict_get(widget, "data", [])
-        if not widgets_data:
+        has_more = dict_get(resp, "data.hasMore", True)
+        if has_more and not widgets_data:
             logger.warn("    × No products data extracted")
             return []
         for item in widgets_data:
             item_dict = self.item_to_dict(item)
             res.append(item_dict)
         return res
-
-    def save(self, listings_data: list[dict], save_path: Path):
-        pass
 
 
 @dataclass
@@ -465,14 +488,15 @@ class SwiggyCategoryScraper:
                 return local_filters_dict
         filters_path = get_filters_dump_path(self.date_str, self.location)
         tab = self.client.browser.latest_tab
+        taxonomyType = get_url_param_value(sctx.url, "taxonomyType")
         listing_params = {
             "categoryName": sctx.sname,
             "storeId": "1135722",
             "primaryStoreId": "1135722",
             "secondaryStoreId": "1396282",
-            "taxonomyType": "Speciality taxonomy 1",
+            "taxonomyType": taxonomyType,
         }
-        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(listing_params, quote_via=quote)}"
+        url = f"{SWIGGY_API_LISTING_URL}?{urlencode_quote(listing_params)}"
         logger.note(f"  * GET filters: {logstr.mesg(brk(sctx.sname))}")
         tab.get(url, timeout=10)
 
@@ -485,10 +509,14 @@ class SwiggyCategoryScraper:
             except:
                 sleep(1)
 
-        if resp_json:
-            categ_filters = self.filters_extractor.extract(resp_json)
+        if resp_json and dict_get(resp_json, "data"):
+            categ_filters = self.filters_extractor.extract(
+                resp_json, listing_params=listing_params
+            )
             self.filters_extractor.save(categ_filters, filters_path)
         else:
+            logger.warn(f"  × No filters in response: {logstr.file(brk(url))}")
+            raise_breakpoint()
             return {}
         return categ_filters
 
@@ -524,17 +552,18 @@ class SwiggyCategoryScraper:
     ) -> dict:
         # https://www.swiggy.com/api/instamart/category-listing/filter?filterId=6822eeeded32000001e25aa2&storeId=1135722&primaryStoreId=1135722&secondaryStoreId=1396282&type=Speciality%20taxonomy%201&pageNo=1&limit=20&filterName=Fresh%20Vegetables&categoryName=Fresh%20Vegetables&offset=20
         filter_name = dict_get(filter_item, "name", None)
+        taxonomy_type = dict_get(filter_item, "type", None)
         listing_params = {
             "filterId": dict_get(filter_item, "id", None),
             "storeId": "1135722",
             "primaryStoreId": "1135722",
             "secondaryStoreId": "1396282",
-            "type": "Speciality taxonomy 1",
+            "type": taxonomy_type,
             "categoryName": sctx.sname,
             "filterName": filter_name,
         }
         listing_params.update({"pageNo": page_no, "limit": limit, "offset": offset})
-        url = f"{SWIGGY_API_FILTER_URL}?{urlencode(listing_params, quote_via=quote)}"
+        url = f"{SWIGGY_API_FILTER_URL}?{urlencode_quote(listing_params)}"
         payload = {"facets": {}, "sortAttribute": ""}
         payload_json = json.dumps(payload)
 
@@ -705,8 +734,8 @@ class SwiggyCategoryScraper:
                 if not self.switcher.is_at_idx(location_idx):
                     self.switcher.set_location(location_idx)
                 self.process_context(cctx=cctx, sctx=sctx)
-                raise_breakpoint()
-                self.wait_next(5)
+                # raise_breakpoint()
+                # self.wait_next(5)
         self.client.stop_client()
 
 
