@@ -8,12 +8,13 @@ from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
 from time import sleep
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
+from tclogger import raise_breakpoint
 from typing import Literal
 from urllib.parse import parse_qs, urlparse, urlencode
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS, SWIGGY_TRAVERSER_SETTING
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
-from web.blinkit.traverser import norm_name, load_json, raise_breakpoint
+from web.blinkit.traverser import norm_name, load_json
 from web.browser import BrowserClient
 from web.constants import norm_date_str
 from cli.arg import TraverserArgParser
@@ -40,6 +41,14 @@ def get_summary_root(date_str: str = None) -> Path:
 def get_categ_dump_path(date_str: str = None, location: str = None) -> Path:
     dump_root = get_dump_root(date_str)
     path_parts = ["categories.json"]
+    if location:
+        path_parts = [location] + path_parts
+    return dump_root.joinpath(*path_parts)
+
+
+def get_filters_dump_path(date_str: str = None, location: str = None) -> Path:
+    dump_root = get_dump_root(date_str)
+    path_parts = ["filters.json"]
     if location:
         path_parts = [location] + path_parts
     return dump_root.joinpath(*path_parts)
@@ -182,6 +191,39 @@ class SwiggyCategoriesFetcher:
             return {}
 
 
+class SwiggyFiltersExtractor:
+    def extract(self, resp: dict) -> dict:
+        filter_items = []
+        filters = dict_get(resp, "data.filters", []) or []
+        for filter_dict in filters:
+            filter_item = {
+                "id": dict_get(filter_dict, "id", None),
+                "name": dict_get(filter_dict, "name", None),
+                "type": dict_get(filter_dict, "type", None),
+                "productCount": dict_get(filter_dict, "productCount", None),
+            }
+            filter_items.append(filter_item)
+        res = {
+            "categ_id": dict_get(resp, "data.selectedCategoryId", None),
+            "categ_name": dict_get(resp, "data.selectedCategoryName", None),
+            "filters": filter_items,
+        }
+        return res
+
+    def save(self, categ_filters: dict, save_path: Path):
+        logger.okay(f"  ✓ Save filters to:", end=" ")
+        if not save_path.exists():
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+        else:
+            data = load_json(save_path)
+        categ_name = dict_get(categ_filters, "categ_name", None)
+        with open(save_path, "w", encoding="utf-8") as wf:
+            data[categ_name] = categ_filters
+            json.dump(data, wf, ensure_ascii=False, indent=4)
+        logger.okay(f"{brk(save_path)}")
+
+
 class SwiggyListingExtractor:
     def select_variation(self, variations: list[dict]) -> dict:
         if not variations:
@@ -230,8 +272,6 @@ class SwiggyListingExtractor:
         for item in widgets_data:
             item_dict = self.item_to_dict(item)
             res.append(item_dict)
-            print(item_dict)
-            raise_breakpoint()
         return res
 
 
@@ -362,42 +402,30 @@ class SwiggyCategoryScraper:
         self.switcher = switcher
         self.date_str = norm_date_str(date_str)
         self.location = location
-        self.extractor = SwiggyListingExtractor()
-        self.last_offset: int = None
-        self.same_offset_count: int = 0
+        self.listing_extractor = SwiggyListingExtractor()
+        self.filters_extractor = SwiggyFiltersExtractor()
 
-    def scrape(self, sctx: SwiggySubCategoryContext) -> list:
+    def scrape_filters(self, sctx: SwiggySubCategoryContext) -> list:
         # https://www.swiggy.com/api/instamart/category-listing?categoryName=Fresh%20Fruits&storeId=1135722&pageNo=0&offset=0&filterName=&primaryStoreId=1135722&secondaryStoreId=1396282&taxonomyType=Speciality%20taxonomy%201
-
         tab = self.client.browser.latest_tab
-        tab.set.load_mode.none()
-
-        products_data = []
-
-        url_params = {
+        # tab.set.load_mode.none()
+        listing_params = {
             "categoryName": sctx.sname,
             "storeId": "1135722",
             "primaryStoreId": "1135722",
+            "secondaryStoreId": "1396282",
             "taxonomyType": "Speciality taxonomy 1",
-            "offset": "0",
         }
-
-        page_no = 0
-        url_params["pageNo"] = str(page_no)
-        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(url_params)}"
-        logger.note(f"  * GET: [{logstr.mesg(sctx.sname)}] Page {logstr.file(page_no)}")
-
+        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(listing_params)}"
+        logger.note(f"  * GET filters: {logstr.mesg(brk(sctx.sname))}")
         tab.get(url)
         resp_json = tab.json
-
         if resp_json:
-            resp_data = self.extractor.extract(resp_json)
-            products_data.extend(resp_data)
-            sleep(3)
+            resp_data = self.filters_extractor.extract(resp_json)
+            filters_path = get_filters_dump_path(self.date_str, self.location)
+            self.filters_extractor.save(resp_data, filters_path)
 
         raise_breakpoint()
-
-        return products_data
 
     def skip_json(self, json_path: Path):
         with logger.temp_indent(2):
@@ -416,11 +444,6 @@ class SwiggyCategoryScraper:
     ) -> Literal["not_exists", "incomplete", "exists"]:
         if not json_path.exists():
             return "not_exists"
-        # json_data = load_json(json_path)
-        # products = dict_get(json_data, "products", []) or []
-        # items_count = len(products)
-        # if items_count > 0 and items_count % 15 == 0:
-        #     return "incomplete"
         return "exists"
 
     def construct_save_data(
@@ -445,11 +468,7 @@ class SwiggyCategoryScraper:
         self, cctx: SwiggyCategoryContext, sctx: SwiggySubCategoryContext
     ):
         with logger.temp_indent(2):
-            products_data = self.scrape(sctx)
-            save_data = self.construct_save_data(
-                cctx=cctx, sctx=sctx, products_data=products_data
-            )
-            self.save_json(save_data, sctx.json_path)
+            self.scrape_filters(sctx)
 
     def wait_next(self, seconds: int = 8):
         logger.note(f"  > Waiting {seconds}s for next ...")
@@ -465,20 +484,12 @@ class SwiggyCategoryScraper:
             cctx.log_info()
             for sctx in cctx.sctxs:
                 json_path = sctx.json_path
-                json_status = self.check_json_status(json_path)
-                if json_status == "exists":
-                    self.skip_json(json_path)
-                    continue
-                if json_status == "incomplete":
-                    # raise_breakpoint()
-                    continue
                 sctx.log_info()
-                # not_exists/incomplete: scrape and save
                 if not self.switcher.is_at_idx(location_idx):
                     self.switcher.set_location(location_idx)
                 self.process_context(cctx=cctx, sctx=sctx)
-                self.wait_next(8)
-                # raise_breakpoint()
+                raise_breakpoint()
+                self.wait_next(5)
         self.client.stop_client()
 
 
