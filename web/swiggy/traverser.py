@@ -9,8 +9,7 @@ from pathlib import Path
 from time import sleep
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
 from tclogger import raise_breakpoint
-from typing import Literal
-from urllib.parse import parse_qs, urlparse, urlencode, quote
+from urllib.parse import parse_qs, urlparse, urlencode, quote, unquote
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS, SWIGGY_TRAVERSER_SETTING
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
@@ -80,22 +79,29 @@ class SwiggyCategoriesExtractor:
     def extract_main_info_from_card(self, card: dict) -> dict:
         main_info = {
             "id": dict_get(card, "id", None),
-            "name": dict_get(card, "header.title", None),
+            "name": dict_get(card, "header.title", "").strip(),
         }
         logger.mesg(main_info, indent=4)
         return main_info
+
+    def unify_link(self, link: str) -> str:
+        if not link:
+            return link
+        link = link.replace("swiggy://ageConsent?url=", "")
+        link = unquote(link)
+        link = link.replace("swiggy://stores", SWIGGY_URL)
+        link = link.replace(" ", "+")
+        return link
 
     def extract_items_info_from_card(self, card: dict) -> list[dict]:
         items_info = []
         items = dict_get(card, "gridElements.infoWithStyle.info", [])
         for item in items:
             link = dict_get(item, "action.link", None)
-            if link:
-                link = link.replace("swiggy://stores", SWIGGY_URL)
-                link = link.replace(" ", "+")
+            link = self.unify_link(link)
             item_info = {
                 "id": dict_get(item, "id", None),
-                "name": dict_get(item, "description", None),
+                "name": dict_get(item, "description", "").strip(),
                 "link": link,
                 # "widgetId": dict_get(item, "analytics.extraFields.widgetId", None),
             }
@@ -103,7 +109,11 @@ class SwiggyCategoriesExtractor:
         return items_info
 
     def should_skip_main(self, main_info: dict):
-        return dict_get(main_info, "name", "").lower().startswith("best from noice")
+        name: str = dict_get(main_info, "name", "").lower()
+        for prefix in ["best from noice", "shop by store"]:
+            if name.startswith(prefix):
+                return True
+        return False
 
     def extract_categories_from_json(self, categ_json: dict) -> list[dict]:
         cards = dict_get(categ_json, "data.cards", [])
@@ -232,7 +242,6 @@ class SwiggyFiltersExtractor:
         filter_items = []
         filters = dict_get(resp, "data.filters", []) or []
         if not filters:
-            print(resp)
             logger.warn("  × No filters found in response")
             raise_breakpoint()
             return {}
@@ -254,7 +263,7 @@ class SwiggyFiltersExtractor:
             link = f"{SWIGGY_LISTING_URL}?{urlencode_quote(link_params)}"
             filter_item = {
                 "id": dict_get(filter_dict, "id", None),
-                "name": dict_get(filter_dict, "name", None),
+                "name": dict_get(filter_dict, "name", "").strip(),
                 "type": dict_get(filter_dict, "type", None),
                 "productCount": dict_get(filter_dict, "productCount", None),
                 "link": link,
@@ -322,6 +331,7 @@ class SwiggyListingExtractor:
             widget_type = dict_get(widget, "widgetInfo.widgetType", "")
             if widget_type.lower() == "text_widget":
                 widget_text = dict_get(widget, "widgetInfo.title", "")
+                widget_text = re.sub("<.*?>", "", widget_text)
                 logger.note(f"    * {widget_text}")
                 continue
             if widget_type.lower() == "product_list":
@@ -352,7 +362,7 @@ class SwiggySubCategoryContext:
         return f"[{logstr.file(self.sidx)}/{logstr.mesg(self.stotal)}]"
 
     def label_str(self) -> str:
-        return logstr.note(f"{self.sname} (cid/{self.cid}/{self.sid})")
+        return logstr.note(f"{self.sname} ({self.cid}/{self.sid})")
 
     def idx_label_str(self) -> str:
         return f"{self.idx_str()} {self.label_str()}"
@@ -374,7 +384,7 @@ class SwiggyCategoryContext:
         return f"[{logstr.file(self.cidx)}/{logstr.mesg(self.ctotal)}]"
 
     def label_str(self) -> str:
-        return logstr.note(f"{self.cname} (cid/{self.cid})")
+        return logstr.note(f"{self.cname} ({self.cid})")
 
     def idx_label_str(self) -> str:
         return f"{self.idx_str()} {self.label_str()}"
@@ -401,15 +411,7 @@ class SwiggyCategoryIterator:
         self.categories = categ_data.get("categories", []) or []
 
     def get_json_path(self, cid: int, sid: int) -> Path:
-        cid_str = str(cid)
-        parts = [cid_str, f"{cid_str}_{sid}.json"]
-        if self.location:
-            parts = [self.location] + parts
-        return self.dump_root.joinpath(*parts)
-
-    def get_sub_categ_url(self, name: str, cid: int, sid: int) -> str:
-        mark = norm_name(name)
-        return f"https://blinkit.com/cn/{mark}/cid/{cid}/{sid}"
+        return None
 
     def __iter__(self):
         ctotal = len(self.categories)
@@ -515,7 +517,9 @@ class SwiggyCategoryScraper:
             )
             self.filters_extractor.save(categ_filters, filters_path)
         else:
-            logger.warn(f"  × No filters in response: {logstr.file(brk(url))}")
+            logger.warn(f"  × No filters from url:")
+            logger.file(f"    *  api url: {url}")
+            logger.file(f"    * sctx.url: {sctx.url}")
             raise_breakpoint()
             return {}
         return categ_filters
