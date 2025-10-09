@@ -195,6 +195,24 @@ class SwiggyCategoriesFetcher:
 
 class SwiggyFiltersExtractor:
     def extract(self, resp: dict) -> dict:
+        """Return:
+        ```json
+        {
+            "categ_id": "6822eeeded32000001e25aa1",
+            "categ_name": "Fresh Vegetables",
+            "filters": [
+                {
+                    "id": "6822eeeded32000001e25aa2",
+                    "name": "Fresh Vegetables",
+                    "type": "Speciality taxonomy 1",
+                    "productCount": 87,
+                    "link": "https://www.swiggy.com/instamart/category-listing?categoryName=Fresh+Vegetables&custom_back=True&filterId=6822eeeded32000001e25aa2&offset=0&showAgeConsent=False&storeId=1135722&taxonomyType=Speciality+taxonomy+1"
+                },
+                ...
+            ]
+        }
+        ```
+        """
         filter_items = []
         filters = dict_get(resp, "data.filters", []) or []
         categ_info = {
@@ -202,7 +220,6 @@ class SwiggyFiltersExtractor:
             "categ_name": dict_get(resp, "data.selectedCategoryName", None),
         }
         for filter_dict in filters:
-            # https://www.swiggy.com/instamart/category-listing?categoryName=Fresh+Vegetables&custom_back=true&filterId=6822eeeded32000001e25aa3&filterName=&offset=0&showAgeConsent=false&storeId=1135722&taxonomyType=Speciality+taxonomy+1
             link_params = {
                 "categoryName": dict_get(categ_info, "categ_name", None),
                 "custom_back": True,
@@ -422,10 +439,29 @@ class SwiggyCategoryScraper:
         self.listing_extractor = SwiggyListingExtractor()
         self.filters_extractor = SwiggyFiltersExtractor()
 
-    def scrape_filters(self, sctx: SwiggySubCategoryContext) -> dict:
+    def load_local_filters(self, sctx: SwiggySubCategoryContext) -> dict:
+        filters_path = get_filters_dump_path(self.date_str, self.location)
+        if not filters_path.exists():
+            return None
+        data = load_json(filters_path)
+        if sctx.sname in data:
+            return dict_get(data, sctx.sname, {})
+        return None
+
+    def scrape_filters(
+        self, sctx: SwiggySubCategoryContext, skip_exists: bool = True
+    ) -> dict:
         # https://www.swiggy.com/api/instamart/category-listing?categoryName=Fresh%20Fruits&storeId=1135722&pageNo=0&offset=0&filterName=&primaryStoreId=1135722&secondaryStoreId=1396282&taxonomyType=Speciality%20taxonomy%201
+        if skip_exists:
+            local_filters = self.load_local_filters(sctx)
+            if local_filters:
+                logger.okay(
+                    f"  ✓ Load local filters: "
+                    f"{logstr.mesg(brk(sctx.cname))} - {logstr.file(brk(sctx.sname))}"
+                )
+                return local_filters
+        filters_path = get_filters_dump_path(self.date_str, self.location)
         tab = self.client.browser.latest_tab
-        # tab.set.load_mode.none()
         listing_params = {
             "categoryName": sctx.sname,
             "storeId": "1135722",
@@ -448,7 +484,6 @@ class SwiggyCategoryScraper:
 
         if resp_json:
             categ_filters = self.filters_extractor.extract(resp_json)
-            filters_path = get_filters_dump_path(self.date_str, self.location)
             self.filters_extractor.save(categ_filters, filters_path)
         else:
             return {}
@@ -463,6 +498,7 @@ class SwiggyCategoryScraper:
         offset: int,
         limit: int = 20,
     ) -> dict:
+        """NotInUse: used by `requests_listings`"""
         # https://www.swiggy.com/api/instamart/category-listing/filter?filterId=6822eeeded32000001e25aa2&storeId=1135722&primaryStoreId=1135722&secondaryStoreId=1396282&type=Speciality%20taxonomy%201&pageNo=1&limit=20&filterName=Fresh%20Vegetables&categoryName=Fresh%20Vegetables&offset=20
         filter_name = dict_get(filter_item, "name", None)
         listing_params = {
@@ -572,9 +608,9 @@ class SwiggyCategoryScraper:
     ):
         with logger.temp_indent(2):
             categ_filters = self.scrape_filters(sctx)
-            raise_breakpoint()
             for filter_item in dict_get(categ_filters, "filters", []):
                 self.scrape_listings(sctx, filter_item)
+            raise_breakpoint()
 
     def wait_next(self, seconds: int = 8):
         logger.note(f"  > Waiting {seconds}s for next ...")
