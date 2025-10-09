@@ -3,6 +3,7 @@ import json
 import pandas as pd
 import re
 
+from acto import Retrier
 from dataclasses import dataclass
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from pathlib import Path
@@ -146,9 +147,14 @@ class SwiggyCategoriesExtractor:
 
 class SwiggyCategoriesFetcher:
     def __init__(
-        self, client: BrowserClient, date_str: str = None, location: str = None
+        self,
+        client: BrowserClient,
+        switcher: SwiggyLocationSwitcher,
+        date_str: str = None,
+        location: str = None,
     ):
         self.client = client
+        self.switcher = switcher
         self.date_str = norm_date_str(date_str)
         self.extractor = SwiggyCategoriesExtractor(client=client, verbose=True)
         self.location = location
@@ -210,7 +216,9 @@ class SwiggyCategoriesFetcher:
             json.dump(resp, wf, indent=4, ensure_ascii=False)
         logger.okay(f"{brk(self.dump_path)}")
 
-    def run(self):
+    def run(self, location_idx: int = None):
+        if not self.switcher.is_at_idx(location_idx):
+            self.switcher.set_location(location_idx)
         resp_data = self.fetch()
         if resp_data:
             if resp_data:
@@ -692,6 +700,7 @@ class SwiggyCategoryScraper:
             "filter_link": dict_get(filter_item, "link", None),
             "location": self.location,
             "count": len(listings_data),
+            "count_expected": dict_get(filter_item, "productCount", None),
             "listings": listings_data,
         }
         return save_data
@@ -719,14 +728,12 @@ class SwiggyCategoryScraper:
             categ_filters = self.scrape_filters(sctx)
             for filter_item in dict_get(categ_filters, "filters", []):
                 self.scrape_listings(sctx, filter_item, skip_exists=True)
-            # raise_breakpoint()
 
     def wait_next(self, seconds: int = 8):
         logger.note(f"  > Waiting {seconds}s for next ...")
         sleep(seconds)
 
-    def run(self, location: str = None, location_idx: int = 0):
-        self.location = location or self.location
+    def run(self, location_idx: int = 0):
         iterator = SwiggyCategoryIterator(
             date_str=self.date_str, location=self.location
         )
@@ -738,8 +745,6 @@ class SwiggyCategoryScraper:
                 if not self.switcher.is_at_idx(location_idx):
                     self.switcher.set_location(location_idx)
                 self.process_context(cctx=cctx, sctx=sctx)
-                # raise_breakpoint()
-                # self.wait_next(5)
         self.client.stop_client()
 
 
@@ -761,17 +766,18 @@ class SwiggyTraverser:
             client_settings=self.client_settings, locations=self.locations
         )
         self.fetcher = SwiggyCategoriesFetcher(
-            client=self.client, date_str=self.date_str
+            client=self.client, switcher=self.switcher, date_str=self.date_str
         )
         self.scraper = SwiggyCategoryScraper(
             client=self.client, switcher=self.switcher, date_str=self.date_str
         )
 
     def run(self):
-        for location_idx, location_item in enumerate(self.locations[:1]):
+        for location_idx, location_item in enumerate(self.locations[:]):
             location_name = location_item.get("name", "")
             location_text = location_item.get("text", "")
             self.fetcher.location = location_name
+            self.scraper.location = location_name
             logger.hint(f"> Location: {location_name} - {location_text}")
             categ_path = get_categ_dump_path(
                 date_str=self.date_str, location=location_name
@@ -780,14 +786,11 @@ class SwiggyTraverser:
                 logger.mesg(
                     f"> Skip fetch existed categories: {logstr.file(brk(categ_path))}"
                 )
-            else:
-                if not self.switcher.is_at_idx(location_idx):
-                    self.switcher.set_location(location_idx)
-                self.fetcher.run()
-            self.scraper.run(location=location_name, location_idx=location_idx)
+                self.fetcher.run(location_idx=location_idx)
+            self.scraper.run(location_idx=location_idx)
 
 
-CATEG_COLUMNS = ["categ", "sub_categ", "url", "cid", "sid"]
+CATEG_COLUMNS = ["categ", "sub_categ", "filter_categ", "filter_link"]
 PRODUCT_COLUMNS = [
     "product_name",
     "brand",
@@ -795,13 +798,11 @@ PRODUCT_COLUMNS = [
     "price",
     "mrp",
     "unit",
-    "inventory",
-    "product_state",
+    "quantity",
+    "in_stock",
 ]
-DF_INT_COLUMNS = ["cid", "sid", "product_id", "price", "mrp", "inventory"]
-COLUMN_RENAMES = {
-    "url": "categ_url",
-}
+DF_INT_COLUMNS = ["price", "mrp", "quantity"]
+COLUMN_RENAMES = {}
 
 
 class SwiggySummarizer:
@@ -908,10 +909,22 @@ class SwiggySummarizer:
         self.save_dfs_to_xlsx(df_locs)
 
 
-def main(args: argparse.Namespace):
-    if args.traverse:
+def run_traverser(args: argparse.Namespace):
+    try:
         traverser = SwiggyTraverser(skip_exists=True, date_str=args.date)
         traverser.run()
+    except Exception as e:
+        logger.warn(e)
+        logger.warn(f"> Closing tabs ...")
+        sleep(5)
+        traverser.client.close_other_tabs()
+        raise e
+
+
+def main(args: argparse.Namespace):
+    if args.traverse:
+        with Retrier(max_retries=50, retry_interval=60) as retrier:
+            retrier.run(run_traverser, args=args)
 
     if args.summarize:
         summarizer = SwiggySummarizer(date_str=args.date)
