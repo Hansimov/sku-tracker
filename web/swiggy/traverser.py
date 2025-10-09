@@ -23,9 +23,11 @@ from cli.arg import TraverserArgParser
 WEBSITE_NAME = "swiggy"
 SWIGGY_URL = "https://www.swiggy.com"
 SWIGGY_CATEG_URL = "https://www.swiggy.com/instamart"
+SWIGGY_LISTING_URL = "https://www.swiggy.com/instamart/category-listing"
 SWIGGY_API_HOME_URL = "https://www.swiggy.com/api/instamart/home/v2\?.*"
 SWIGGY_API_LISTING_URL = "https://www.swiggy.com/api/instamart/category-listing"
-SWIGGY_API_FILTER_URL = (
+SWIGGY_API_FILTER_URL = "https://www.swiggy.com/api/instamart/category-listing/filter"
+SWIGGY_API_FILTER_RE = (
     "https://www.swiggy.com/api/instamart/category-listing/filter\?.*"
 )
 
@@ -195,17 +197,32 @@ class SwiggyFiltersExtractor:
     def extract(self, resp: dict) -> dict:
         filter_items = []
         filters = dict_get(resp, "data.filters", []) or []
+        categ_info = {
+            "categ_id": dict_get(resp, "data.selectedCategoryId", None),
+            "categ_name": dict_get(resp, "data.selectedCategoryName", None),
+        }
         for filter_dict in filters:
+            # https://www.swiggy.com/instamart/category-listing?categoryName=Fresh+Vegetables&custom_back=true&filterId=6822eeeded32000001e25aa3&filterName=&offset=0&showAgeConsent=false&storeId=1135722&taxonomyType=Speciality+taxonomy+1
+            link_params = {
+                "categoryName": dict_get(categ_info, "categ_name", None),
+                "custom_back": True,
+                "filterId": dict_get(filter_dict, "id", None),
+                "offset": 0,
+                "showAgeConsent": False,
+                "storeId": "1135722",
+                "taxonomyType": "Speciality taxonomy 1",
+            }
+            link = f"{SWIGGY_LISTING_URL}?{urlencode(link_params)}"
             filter_item = {
                 "id": dict_get(filter_dict, "id", None),
                 "name": dict_get(filter_dict, "name", None),
                 "type": dict_get(filter_dict, "type", None),
                 "productCount": dict_get(filter_dict, "productCount", None),
+                "link": link,
             }
             filter_items.append(filter_item)
         res = {
-            "categ_id": dict_get(resp, "data.selectedCategoryId", None),
-            "categ_name": dict_get(resp, "data.selectedCategoryName", None),
+            **categ_info,
             "filters": filter_items,
         }
         return res
@@ -405,7 +422,7 @@ class SwiggyCategoryScraper:
         self.listing_extractor = SwiggyListingExtractor()
         self.filters_extractor = SwiggyFiltersExtractor()
 
-    def scrape_filters(self, sctx: SwiggySubCategoryContext) -> list:
+    def scrape_filters(self, sctx: SwiggySubCategoryContext) -> dict:
         # https://www.swiggy.com/api/instamart/category-listing?categoryName=Fresh%20Fruits&storeId=1135722&pageNo=0&offset=0&filterName=&primaryStoreId=1135722&secondaryStoreId=1396282&taxonomyType=Speciality%20taxonomy%201
         tab = self.client.browser.latest_tab
         # tab.set.load_mode.none()
@@ -418,14 +435,100 @@ class SwiggyCategoryScraper:
         }
         url = f"{SWIGGY_API_LISTING_URL}?{urlencode(listing_params)}"
         logger.note(f"  * GET filters: {logstr.mesg(brk(sctx.sname))}")
-        tab.get(url)
-        resp_json = tab.json
-        if resp_json:
-            resp_data = self.filters_extractor.extract(resp_json)
-            filters_path = get_filters_dump_path(self.date_str, self.location)
-            self.filters_extractor.save(resp_data, filters_path)
+        tab.get(url, timeout=10)
 
-        raise_breakpoint()
+        resp_json = None
+        is_get_json = False
+        while not is_get_json:
+            try:
+                resp_json = tab.json
+                is_get_json = True
+            except:
+                sleep(1)
+
+        if resp_json:
+            categ_filters = self.filters_extractor.extract(resp_json)
+            filters_path = get_filters_dump_path(self.date_str, self.location)
+            self.filters_extractor.save(categ_filters, filters_path)
+        else:
+            return {}
+        return categ_filters
+
+    def fetch_listing(
+        self,
+        sctx: SwiggySubCategoryContext,
+        filter_item: dict,
+        tab: ChromiumTab,
+        page_no: int,
+        offset: int,
+        limit: int = 20,
+    ) -> dict:
+        # https://www.swiggy.com/api/instamart/category-listing/filter?filterId=6822eeeded32000001e25aa2&storeId=1135722&primaryStoreId=1135722&secondaryStoreId=1396282&type=Speciality%20taxonomy%201&pageNo=1&limit=20&filterName=Fresh%20Vegetables&categoryName=Fresh%20Vegetables&offset=20
+        filter_name = dict_get(filter_item, "name", None)
+        listing_params = {
+            "filterId": dict_get(filter_item, "id", None),
+            "storeId": "1135722",
+            "primaryStoreId": "1135722",
+            "secondaryStoreId": "1396282",
+            "taxonomyType": "Speciality taxonomy 1",
+            "categoryName": sctx.sname,
+            "filterName": filter_name,
+        }
+        listing_params.update({"pageNo": page_no, "limit": limit, "offset": offset})
+        url = f"{SWIGGY_API_FILTER_URL}?{urlencode(listing_params)}"
+
+    def requests_listings(self, sctx: SwiggySubCategoryContext, filter_item: dict):
+        """NotInUse: backup solution to get listings via POST request"""
+        tab = self.client.browser.latest_tab
+        tab.get(sctx.url, timeout=10)
+        filter_name = dict_get(filter_item, "name", None)
+        listing_str = (
+            f"{logstr.mesg(brk(sctx.sname))} - {logstr.file(brk(filter_name))}"
+        )
+        logger.note(f"  * GET listings: {listing_str}")
+        offset = 0
+        page_no = 0
+        limit = 20
+        has_more = True
+        while has_more:
+            logger.file(f"    * Page {page_no}, Offset {offset}")
+            self.fetch_listing(
+                sctx=sctx,
+                filter_item=filter_item,
+                tab=tab,
+                page_no=page_no,
+                offset=offset,
+                limit=limit,
+            )
+            page_no += 1
+            offset += limit
+
+    def scrape_listings(
+        self, sctx: SwiggySubCategoryContext, filter_item: dict
+    ) -> list:
+        tab = self.client.browser.latest_tab
+        listen_targets = [SWIGGY_API_FILTER_RE]
+        tab.listen.start(targets=listen_targets, is_regex=True)
+        res = []
+        has_more = True
+        tab.get(filter_item.get("link"), timeout=20)
+        while has_more:
+            for packet in tab.listen.steps(timeout=20):
+                packet_url = packet.url
+                if re.match(SWIGGY_API_FILTER_RE, packet_url):
+                    packet_resp = packet.response
+                    if packet_resp:
+                        packet_json = packet_resp.body
+                        listing_data = self.listing_extractor.extract(packet_json)
+                        print(listing_data)
+                        res.append(listing_data)
+                        has_more = dict_get(packet_json, "data.hasMore", False)
+                    else:
+                        has_more = False
+                    break
+            sleep(2)
+
+        return res
 
     def skip_json(self, json_path: Path):
         with logger.temp_indent(2):
@@ -468,7 +571,10 @@ class SwiggyCategoryScraper:
         self, cctx: SwiggyCategoryContext, sctx: SwiggySubCategoryContext
     ):
         with logger.temp_indent(2):
-            self.scrape_filters(sctx)
+            categ_filters = self.scrape_filters(sctx)
+            raise_breakpoint()
+            for filter_item in dict_get(categ_filters, "filters", []):
+                self.scrape_listings(sctx, filter_item)
 
     def wait_next(self, seconds: int = 8):
         logger.note(f"  > Waiting {seconds}s for next ...")
