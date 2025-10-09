@@ -245,7 +245,8 @@ class SwiggyFiltersExtractor:
         return res
 
     def save(self, categ_filters: dict, save_path: Path):
-        logger.okay(f"  ✓ Save filters to:", end=" ")
+        filters_count = len(categ_filters.get("filters", []))
+        logger.okay(f"  ✓ Save {logstr.mesg(filters_count)} filters to:", end=" ")
         if not save_path.exists():
             save_path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
@@ -307,6 +308,9 @@ class SwiggyListingExtractor:
             item_dict = self.item_to_dict(item)
             res.append(item_dict)
         return res
+
+    def save(self, listings_data: list[dict], save_path: Path):
+        pass
 
 
 @dataclass
@@ -440,8 +444,10 @@ class SwiggyCategoryScraper:
         if not filters_path.exists():
             return None
         data = load_json(filters_path)
-        if sctx.sname in data:
-            return dict_get(data, sctx.sname, {})
+        sname_data = dict_get(data, sctx.sname, {})
+        filters = dict_get(sname_data, "filters", [])
+        if filters:
+            return sname_data
         return None
 
     def scrape_filters(
@@ -449,13 +455,14 @@ class SwiggyCategoryScraper:
     ) -> dict:
         # https://www.swiggy.com/api/instamart/category-listing?categoryName=Fresh%20Fruits&storeId=1135722&pageNo=0&offset=0&filterName=&primaryStoreId=1135722&secondaryStoreId=1396282&taxonomyType=Speciality%20taxonomy%201
         if skip_exists:
-            local_filters = self.load_local_filters(sctx)
-            if local_filters:
+            local_filters_dict = self.load_local_filters(sctx)
+            if local_filters_dict:
+                filters_count = len(local_filters_dict.get("filters", []))
                 logger.okay(
-                    f"  ✓ Load local filters: "
+                    f"  ✓ Load {logstr.mesg(filters_count)} local filters: "
                     f"{logstr.mesg(brk(sctx.cname))} - {logstr.file(brk(sctx.sname))}"
                 )
-                return local_filters
+                return local_filters_dict
         filters_path = get_filters_dump_path(self.date_str, self.location)
         tab = self.client.browser.latest_tab
         listing_params = {
@@ -484,6 +491,27 @@ class SwiggyCategoryScraper:
         else:
             return {}
         return categ_filters
+
+    def get_listings_path(
+        self, sctx: SwiggySubCategoryContext, filter_item: dict
+    ) -> Path:
+        listings_root = get_filters_dump_path(self.date_str, self.location).parent
+        filter_name = dict_get(filter_item, "name")
+        path_parts = [sctx.cname, sctx.sname, f"{filter_name}.json"]
+        listings_path = listings_root.joinpath(*path_parts)
+        return listings_path
+
+    def load_local_listings(
+        self, sctx: SwiggySubCategoryContext, filter_item: dict
+    ) -> dict:
+        listings_path = self.get_listings_path(sctx, filter_item)
+        if not listings_path.exists():
+            return None
+        data = load_json(listings_path)
+        listings = dict_get(data, "listings", [])
+        if listings:
+            return data
+        return []
 
     def fetch_listing(
         self,
@@ -543,8 +571,22 @@ class SwiggyCategoryScraper:
         return None
 
     def scrape_listings(
-        self, sctx: SwiggySubCategoryContext, filter_item: dict
+        self,
+        sctx: SwiggySubCategoryContext,
+        filter_item: dict,
+        skip_exists: bool = True,
     ) -> list[dict]:
+        if skip_exists:
+            local_listings_dict = self.load_local_listings(sctx, filter_item)
+            if local_listings_dict:
+                listings_count = len(dict_get(local_listings_dict, "listings", []))
+                logger.okay(
+                    f"  ✓ Load {logstr.mesg(listings_count)} local listings: "
+                    f"{logstr.mesg(brk(sctx.cname))} - {logstr.file(brk(sctx.sname))} - "
+                    f"{logstr.file(brk(dict_get(filter_item, 'name', None)))}"
+                )
+                return local_listings_dict
+
         tab = self.client.browser.latest_tab
         if not tab.url.startswith(SWIGGY_LISTING_URL):
             logger.note(f"  * Visit: {logstr.file(sctx.url)}")
@@ -559,7 +601,7 @@ class SwiggyCategoryScraper:
 
         offset, page_no, limit = 0, 0, 20
         has_more = True
-        res = []
+        listings_data = []
         while has_more:
             logger.file(f"    * page={page_no}, offset={offset}")
             logger.store_indent()
@@ -574,13 +616,13 @@ class SwiggyCategoryScraper:
             )
 
             if listing_resp:
-                products = self.listing_extractor.extract(listing_resp)
-                res.extend(products)
+                listings = self.listing_extractor.extract(listing_resp)
+                listings_data.extend(listings)
                 has_more = dict_get(listing_resp, "data.hasMore", False)
+                has_more_str = logstr.mesg(f"hasMore={has_more}")
                 logger.okay(
-                    f"    ✓ Extract {logstr.file(len(products))} products,", end=" "
+                    f"    ✓ Extract {logstr.file(len(listings))} products, {has_more_str}"
                 )
-                logger.mesg(f"hasMore={has_more}")
             else:
                 logger.warn(f"    × Failed to fetch page {page_no}")
                 has_more = False
@@ -592,47 +634,50 @@ class SwiggyCategoryScraper:
             logger.restore_indent()
 
         logger.okay(
-            f"  ✓ Fetched {logstr.mesg(len(res))} products of "
+            f"  ✓ Fetched {logstr.mesg(len(listings_data))} products of "
             f"{logstr.file(brk(filter_name))}"
         )
-        return res
 
-    def skip_json(self, json_path: Path):
-        with logger.temp_indent(2):
-            logger.mesg(f"  ✓ Skip existed json: {logstr.file(brk(json_path))}")
+        self.save_listings(listings_data, sctx, filter_item)
 
-    def save_json(self, data: list[dict], save_path: Path):
-        items = dict_get(data, "products", [])
-        logger.okay(f"  ✓ Save {len(items)} items to:", end=" ")
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "w", encoding="utf-8") as wf:
-            json.dump(data, wf, ensure_ascii=False, indent=4)
-        logger.okay(f"{brk(save_path)}")
+        return listings_data
 
-    def check_json_status(
-        self, json_path: Path
-    ) -> Literal["not_exists", "incomplete", "exists"]:
-        if not json_path.exists():
-            return "not_exists"
-        return "exists"
-
-    def construct_save_data(
+    def construct_listings_save_data(
         self,
-        cctx: SwiggyCategoriesExtractor,
         sctx: SwiggySubCategoryContext,
-        products_data: list[dict],
+        listings_data: list[dict],
+        filter_item: dict,
     ) -> dict:
         save_data = {
-            "categ": cctx.cname,
+            "categ": sctx.cname,
             "sub_categ": sctx.sname,
-            "url": sctx.url,
-            "cid": cctx.cid,
+            "cid": sctx.cid,
             "sid": sctx.sid,
+            "url": sctx.url,
+            "filter_id": dict_get(filter_item, "id", None),
+            "filter_name": dict_get(filter_item, "name", None),
+            "filter_link": dict_get(filter_item, "link", None),
             "location": self.location,
-            "count": len(products_data),
-            "products": products_data,
+            "count": len(listings_data),
+            "listings": listings_data,
         }
         return save_data
+
+    def save_listings(
+        self,
+        listings_data: list[dict],
+        sctx: SwiggySubCategoryContext,
+        filter_item: dict,
+    ):
+        listings_path = self.get_listings_path(sctx, filter_item)
+        logger.okay(f"  ✓ Save {logstr.mesg(len(listings_data))} items to:", end=" ")
+        listings_path.parent.mkdir(parents=True, exist_ok=True)
+        save_data = self.construct_listings_save_data(
+            sctx=sctx, listings_data=listings_data, filter_item=filter_item
+        )
+        with open(listings_path, "w", encoding="utf-8") as wf:
+            json.dump(save_data, wf, ensure_ascii=False, indent=4)
+        logger.okay(f"{brk(listings_path)}")
 
     def process_context(
         self, cctx: SwiggyCategoryContext, sctx: SwiggySubCategoryContext
@@ -640,8 +685,8 @@ class SwiggyCategoryScraper:
         with logger.temp_indent(2):
             categ_filters = self.scrape_filters(sctx)
             for filter_item in dict_get(categ_filters, "filters", []):
-                self.scrape_listings(sctx, filter_item)
-            raise_breakpoint()
+                self.scrape_listings(sctx, filter_item, skip_exists=True)
+            # raise_breakpoint()
 
     def wait_next(self, seconds: int = 8):
         logger.note(f"  > Waiting {seconds}s for next ...")
