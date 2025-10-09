@@ -10,7 +10,7 @@ from time import sleep
 from tclogger import logger, logstr, brk, get_now_str, Runtimer, dict_get
 from tclogger import raise_breakpoint
 from typing import Literal
-from urllib.parse import parse_qs, urlparse, urlencode
+from urllib.parse import parse_qs, urlparse, urlencode, quote
 
 from configs.envs import DATA_ROOT, SWIGGY_LOCATIONS, SWIGGY_TRAVERSER_SETTING
 from web.swiggy.scraper import SwiggyLocationChecker, SwiggyLocationSwitcher
@@ -229,7 +229,7 @@ class SwiggyFiltersExtractor:
                 "storeId": "1135722",
                 "taxonomyType": "Speciality taxonomy 1",
             }
-            link = f"{SWIGGY_LISTING_URL}?{urlencode(link_params)}"
+            link = f"{SWIGGY_LISTING_URL}?{urlencode(link_params, quote_via=quote)}"
             filter_item = {
                 "id": dict_get(filter_dict, "id", None),
                 "name": dict_get(filter_dict, "name", None),
@@ -295,13 +295,13 @@ class SwiggyListingExtractor:
         for widget in widgets:
             widget_type = dict_get(widget, "widgetInfo.widgetType", "")
             if widget_type.lower() == "text_widget":
-                title = dict_get(widget, "widgetInfo.title", "")
-                logger.okay(f"  * {title}")
+                widget_text = dict_get(widget, "widgetInfo.title", "")
+                logger.note(f"    * {widget_text}")
                 continue
             if widget_type.lower() == "product_list":
                 widgets_data = dict_get(widget, "data", [])
         if not widgets_data:
-            logger.warn("  × No products data extracted")
+            logger.warn("    × No products data extracted")
             return []
         for item in widgets_data:
             item_dict = self.item_to_dict(item)
@@ -421,10 +421,6 @@ class SwiggyCategoryIterator:
 
 
 class SwiggyCategoryScraper:
-    LISTEN_INITIAL_TIMEOUT = 30
-    LISTEN_POLL_INTERVAL = 0.5
-    LISTEN_DRAIN_TIMEOUT = 0.5
-
     def __init__(
         self,
         client: BrowserClient,
@@ -469,7 +465,7 @@ class SwiggyCategoryScraper:
             "secondaryStoreId": "1396282",
             "taxonomyType": "Speciality taxonomy 1",
         }
-        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(listing_params)}"
+        url = f"{SWIGGY_API_LISTING_URL}?{urlencode(listing_params, quote_via=quote)}"
         logger.note(f"  * GET filters: {logstr.mesg(brk(sctx.sname))}")
         tab.get(url, timeout=10)
 
@@ -491,14 +487,13 @@ class SwiggyCategoryScraper:
 
     def fetch_listing(
         self,
+        tab: ChromiumTab,
         sctx: SwiggySubCategoryContext,
         filter_item: dict,
-        tab: ChromiumTab,
         page_no: int,
         offset: int,
         limit: int = 20,
     ) -> dict:
-        """NotInUse: used by `requests_listings`"""
         # https://www.swiggy.com/api/instamart/category-listing/filter?filterId=6822eeeded32000001e25aa2&storeId=1135722&primaryStoreId=1135722&secondaryStoreId=1396282&type=Speciality%20taxonomy%201&pageNo=1&limit=20&filterName=Fresh%20Vegetables&categoryName=Fresh%20Vegetables&offset=20
         filter_name = dict_get(filter_item, "name", None)
         listing_params = {
@@ -506,64 +501,100 @@ class SwiggyCategoryScraper:
             "storeId": "1135722",
             "primaryStoreId": "1135722",
             "secondaryStoreId": "1396282",
-            "taxonomyType": "Speciality taxonomy 1",
+            "type": "Speciality taxonomy 1",
             "categoryName": sctx.sname,
             "filterName": filter_name,
         }
         listing_params.update({"pageNo": page_no, "limit": limit, "offset": offset})
-        url = f"{SWIGGY_API_FILTER_URL}?{urlencode(listing_params)}"
+        url = f"{SWIGGY_API_FILTER_URL}?{urlencode(listing_params, quote_via=quote)}"
+        payload = {"facets": {}, "sortAttribute": ""}
+        payload_json = json.dumps(payload)
 
-    def requests_listings(self, sctx: SwiggySubCategoryContext, filter_item: dict):
-        """NotInUse: backup solution to get listings via POST request"""
+        tab.listen.start(targets=SWIGGY_API_FILTER_RE, is_regex=True)
+
+        fetch_js = f"""
+        fetch("{url}", {{
+            method: "POST",
+            headers: {{
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+            }},
+            body: '{payload_json}',
+            credentials: "include"
+        }});
+        """
+        tab.run_js(fetch_js)
+
+        try:
+            for packet in tab.listen.steps(timeout=15):
+                if re.match(SWIGGY_API_FILTER_RE, packet.url):
+                    packet_resp = packet.response
+                    if packet_resp:
+                        logger.okay(f"    ✓ Captured packet")
+                        listing_resp = packet_resp.body
+                        return listing_resp
+                    else:
+                        logger.warn(f"    × No response in packet")
+        except Exception as e:
+            logger.error(f"    × Error capturing packet: {e}")
+        finally:
+            tab.listen.stop()
+
+        return None
+
+    def scrape_listings(
+        self, sctx: SwiggySubCategoryContext, filter_item: dict
+    ) -> list[dict]:
         tab = self.client.browser.latest_tab
-        tab.get(sctx.url, timeout=10)
+        if not tab.url.startswith(SWIGGY_LISTING_URL):
+            logger.note(f"  * Visit: {logstr.file(sctx.url)}")
+            tab.get(sctx.url, timeout=10)
+            sleep(3)
+
         filter_name = dict_get(filter_item, "name", None)
-        listing_str = (
+        logger.note(
+            f"  * GET listings: "
             f"{logstr.mesg(brk(sctx.sname))} - {logstr.file(brk(filter_name))}"
         )
-        logger.note(f"  * GET listings: {listing_str}")
-        offset = 0
-        page_no = 0
-        limit = 20
+
+        offset, page_no, limit = 0, 0, 20
         has_more = True
+        res = []
         while has_more:
-            logger.file(f"    * Page {page_no}, Offset {offset}")
-            self.fetch_listing(
+            logger.file(f"    * page={page_no}, offset={offset}")
+            logger.store_indent()
+            logger.indent(2)
+            listing_resp = self.fetch_listing(
+                tab=tab,
                 sctx=sctx,
                 filter_item=filter_item,
-                tab=tab,
                 page_no=page_no,
                 offset=offset,
                 limit=limit,
             )
-            page_no += 1
-            offset += limit
 
-    def scrape_listings(
-        self, sctx: SwiggySubCategoryContext, filter_item: dict
-    ) -> list:
-        tab = self.client.browser.latest_tab
-        listen_targets = [SWIGGY_API_FILTER_RE]
-        tab.listen.start(targets=listen_targets, is_regex=True)
-        res = []
-        has_more = True
-        tab.get(filter_item.get("link"), timeout=20)
-        while has_more:
-            for packet in tab.listen.steps(timeout=20):
-                packet_url = packet.url
-                if re.match(SWIGGY_API_FILTER_RE, packet_url):
-                    packet_resp = packet.response
-                    if packet_resp:
-                        packet_json = packet_resp.body
-                        listing_data = self.listing_extractor.extract(packet_json)
-                        print(listing_data)
-                        res.append(listing_data)
-                        has_more = dict_get(packet_json, "data.hasMore", False)
-                    else:
-                        has_more = False
-                    break
-            sleep(2)
+            if listing_resp:
+                products = self.listing_extractor.extract(listing_resp)
+                res.extend(products)
+                has_more = dict_get(listing_resp, "data.hasMore", False)
+                logger.okay(
+                    f"    ✓ Extract {logstr.file(len(products))} products,", end=" "
+                )
+                logger.mesg(f"hasMore={has_more}")
+            else:
+                logger.warn(f"    × Failed to fetch page {page_no}")
+                has_more = False
 
+            if has_more:
+                page_no += 1
+                offset += limit
+                sleep(2)
+            logger.restore_indent()
+
+        logger.okay(
+            f"  ✓ Fetched {logstr.mesg(len(res))} products of "
+            f"{logstr.file(brk(filter_name))}"
+        )
         return res
 
     def skip_json(self, json_path: Path):
@@ -625,7 +656,6 @@ class SwiggyCategoryScraper:
         for cctx in iterator:
             cctx.log_info()
             for sctx in cctx.sctxs:
-                json_path = sctx.json_path
                 sctx.log_info()
                 if not self.switcher.is_at_idx(location_idx):
                     self.switcher.set_location(location_idx)
