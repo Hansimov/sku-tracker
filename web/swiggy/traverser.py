@@ -228,7 +228,7 @@ class SwiggyCategoriesFetcher:
 
 
 class SwiggyFiltersExtractor:
-    def extract(self, resp: dict, listing_params: dict = {}) -> dict:
+    def extract(self, resp: dict, listing_params: dict = {}, cname: str = None) -> dict:
         """Return:
         ```json
         {
@@ -257,6 +257,7 @@ class SwiggyFiltersExtractor:
         categ_info = {
             "categ_id": dict_get(resp, "data.selectedCategoryId", None),
             "categ_name": dict_get(resp, "data.selectedCategoryName", None),
+            "cname": cname,
         }
         for filter_dict in filters:
             link_params = {
@@ -521,7 +522,7 @@ class SwiggyCategoryScraper:
 
         if resp_json and dict_get(resp_json, "data"):
             categ_filters = self.filters_extractor.extract(
-                resp_json, listing_params=listing_params
+                resp_json, listing_params=listing_params, cname=sctx.cname
             )
             self.filters_extractor.save(categ_filters, filters_path)
         else:
@@ -786,11 +787,12 @@ class SwiggyTraverser:
                 logger.mesg(
                     f"> Skip fetch existed categories: {logstr.file(brk(categ_path))}"
                 )
+            else:
                 self.fetcher.run(location_idx=location_idx)
             self.scraper.run(location_idx=location_idx)
 
 
-CATEG_COLUMNS = ["categ", "sub_categ", "filter_categ", "filter_link"]
+CATEG_COLUMNS = ["categ", "sub_categ", "filter_name", "filter_link"]
 PRODUCT_COLUMNS = [
     "product_name",
     "brand",
@@ -811,46 +813,67 @@ class SwiggySummarizer:
         self.locations = locations or SWIGGY_LOCATIONS
         self.summary_root = get_summary_root(self.date_str)
 
+    def get_listings_path(
+        self, sctx: SwiggySubCategoryContext, filter_item: dict, location: str
+    ) -> Path:
+        listings_root = get_filters_dump_path(self.date_str, location).parent
+        filter_name = dict_get(filter_item, "name")
+        path_parts = [sctx.cname, sctx.sname, f"{filter_name}.json"]
+        listings_path = listings_root.joinpath(*path_parts)
+        return listings_path
+
+    def categ_dict_to_row(self, categ_data: dict) -> dict:
+        return {col: categ_data.get(col, None) for col in CATEG_COLUMNS}
+
     def product_dict_to_row(self, product: dict) -> dict:
-        if product.get("product_id") is None and product.get("product_name") is None:
+        product_id = product.get("product_id", None)
+        product_name = product.get("product_name", None)
+        if not product_id and not product_name:
             return {}
         row = {col: product.get(col, None) for col in PRODUCT_COLUMNS}
-        product_name = row.get("product_name", "")
-        product_id = row.get("product_id", None)
-        if product_name and product_id:
-            product_mark = norm_name(product_name)
-            product_link = f"https://blinkit.com/prn/{product_mark}/prid/{product_id}"
+        if product_id and product_name:
+            product_link = f"{SWIGGY_CATEG_URL}/item/{product_id}"
         else:
             product_link = None
         row["product_link"] = product_link
         return row
 
-    def categ_dict_to_row(self, data: dict) -> dict:
-        return {col: data.get(col, None) for col in CATEG_COLUMNS}
-
     def get_rows_from_context(
         self, sctx: SwiggySubCategoryContext, location: str
     ) -> list[dict]:
-        json_path = sctx.json_path
-        if not json_path.exists():
-            logger.warn(f"  × JSON not exists: {logstr.file(brk(json_path))}")
+        filters_path = get_filters_dump_path(self.date_str, location)
+        if not filters_path.exists():
+            logger.warn(f"  × Filters not exists: {logstr.file(brk(filters_path))}")
             return []
-        json_data = load_json(json_path)
-        categ_row = self.categ_dict_to_row(json_data)
-        products = dict_get(json_data, "products", []) or []
-        product_rows = [self.product_dict_to_row(product) for product in products]
-        rows = []
-        for product_row in product_rows:
-            if not product_row:
+        res = []
+        filters_data = load_json(filters_path)
+        filter_items = dict_get(filters_data, sctx.sname, {}).get("filters", [])
+        for filter_item in filter_items:
+            listings_path = self.get_listings_path(
+                sctx, filter_item=filter_item, location=location
+            )
+            if not listings_path.exists():
+                logger.warn(
+                    f"  × Listings not exists: {logstr.file(brk(listings_path))}"
+                )
                 continue
-            row = {
-                "date": self.date_str,
-                "location": location,
-                **categ_row,
-                **product_row,
-            }
-            rows.append(row)
-        return rows
+            listings_data = load_json(listings_path)
+            categ_row = self.categ_dict_to_row(listings_data)
+            products = dict_get(listings_data, "listings", []) or []
+            product_rows = [self.product_dict_to_row(product) for product in products]
+            rows = []
+            for product_row in product_rows:
+                if not product_row:
+                    continue
+                row = {
+                    "date": self.date_str,
+                    "location": location,
+                    **categ_row,
+                    **product_row,
+                }
+                rows.append(row)
+            res.extend(rows)
+        return res
 
     def rows_to_df(self, rows: list[dict]) -> pd.DataFrame:
         df = pd.DataFrame(rows)
@@ -860,7 +883,8 @@ class SwiggySummarizer:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
         if not df.empty:
             df = df.drop_duplicates(ignore_index=True)
-        df = df.rename(columns=COLUMN_RENAMES)
+        if COLUMN_RENAMES:
+            df = df.rename(columns=COLUMN_RENAMES)
         print(df)
         return df
 
