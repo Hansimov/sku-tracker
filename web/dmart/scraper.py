@@ -235,7 +235,7 @@ class DmartProductDataExtractor:
         self.verbose = verbose
         self.addr_extractor = LocalAddressExtractor(website_name=WEBSITE_NAME)
 
-    def extract(self, info: dict) -> dict:
+    def extract_variant(self, info: dict, var_idx: int = 0) -> dict:
         logger.enter_quiet(not self.verbose)
         if not info:
             logger.warn("  × Empty response data to extract")
@@ -265,15 +265,8 @@ class DmartProductDataExtractor:
                 "location": location,
             }
 
-        # get selected sku
-        selected_prod = dict_get(info, "resp.selectedProd")
-        sku = None
-        for u in skus:
-            if dict_get(u, "skuUniqueID", "") == selected_prod:
-                sku = u
-                break
-        if not sku:
-            sku = skus[0]
+        # get target sku by index
+        sku = skus[var_idx] if var_idx < len(skus) else skus[0]
 
         # get product_name
         product_name = dict_get(sku, "name", "")
@@ -303,12 +296,67 @@ class DmartProductDataExtractor:
             "price": price,
             "mrp": mrp,
             "in_stock": in_stock_flag,
+            "var_idx": var_idx,
             "location": location,
         }
         logger.okay(dict_to_str(product_data), indent=4)
         logger.exit_quiet(not self.verbose)
 
         return product_data
+
+    def is_price_close(
+        self,
+        price: Union[float, int],
+        ref_price: Union[float, int],
+        max_diff_ratio: float = 0.5,
+    ) -> bool:
+        ratio = abs(price - ref_price) / min(price, ref_price)
+        return ratio < max_diff_ratio
+
+    def check_by_ref(self, res: dict, ref_mrp: Union[int, float] = None) -> bool:
+        mrp = res.get("mrp", None)
+        if not self.is_price_close(mrp, ref_mrp):
+            product_id = res.get("product_id", "")
+            diff = abs(mrp - ref_mrp) / min(mrp, ref_mrp)
+            logger.warn(
+                f"\n  × Outlier variant [{product_id}]: "
+                f"mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})"
+            )
+            return False
+        return True
+
+    def extract_closest_variant(self, info: dict, ref_mrp: Union[int, float]) -> dict:
+        skus = dict_get(info, "resp.pdpData.dynamicPDP.data.productData.sKUs", [])
+        res = {}
+        variant_num = len(skus)
+        for var_idx in range(variant_num):
+            variant_data = self.extract_variant(info, var_idx=var_idx)
+            variant_mrp = variant_data.get("mrp", None)
+            if var_idx == 0:
+                mrp_diff = abs(variant_mrp - ref_mrp)
+                res = variant_data
+                continue
+            if variant_mrp is not None:
+                diff = abs(variant_mrp - ref_mrp)
+                if diff < mrp_diff:
+                    mrp_diff = diff
+                    res = variant_data
+        if res:
+            ref_check_res = self.check_by_ref(res, ref_mrp=ref_mrp)
+            if not ref_check_res:
+                res["in_stock"] = 0
+        else:
+            url = dict_get(info, "cookies.url", "")
+            logger.warn(f"\n  × No variant: {url}", verbose=self.verbose)
+        return res
+
+    def extract(self, info: dict, ref_mrp: Union[int, float] = None) -> dict:
+        """If `ref_mrp` is not None, would choose variant whose `mrp` is closest to `ref_mrp`."""
+        if ref_mrp is None or ref_mrp <= 0:
+            res = self.extract_variant(info, var_idx=0)
+        else:
+            res = self.extract_closest_variant(info, ref_mrp=ref_mrp)
+        return res
 
 
 def test_browser_scraper():

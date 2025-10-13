@@ -287,6 +287,8 @@ class SwiggyProductDataExtractor:
                 f"\n  × Outlier variant [{product_id}]: "
                 f"mrp ({mrp}), ref_mrp ({ref_mrp}), diff ({diff:.2f})\n"
             )
+            return False
+        return True
 
     def extract_closest_variant(self, resp: dict, ref_mrp: Union[int, float]) -> dict:
         variants = dict_get(resp, "productV2.itemData.variations", [])
@@ -305,7 +307,9 @@ class SwiggyProductDataExtractor:
                     mrp_diff = diff
                     res = variant_data
         if res:
-            self.check_by_ref(res, ref_mrp=ref_mrp)
+            ref_check_res = self.check_by_ref(res, ref_mrp=ref_mrp)
+            if not ref_check_res:
+                res["in_stock"] = 0
         else:
             url = dict_get(resp, "cookies.url", "")
             logger.warn(f"\n  × No variant: {url}", verbose=self.verbose)

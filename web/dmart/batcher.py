@@ -12,6 +12,7 @@ from configs.envs import DATA_ROOT, DMART_LOCATIONS
 from file.excel_parser import ExcelReader, DataframeParser
 from web.dmart.scraper import DmartLocationChecker, DmartLocationSwitcher
 from web.dmart.scraper import DmartBrowserScraper, DmartProductDataExtractor
+from web.ref import RefProductDataLoader
 from web.dmart.scraper import url_to_filename
 from web.logs import log_link_idx, log_traceback
 from file.local_dump import LocalAddressExtractor, DmartProductRespChecker
@@ -143,6 +144,7 @@ class DmartExtractBatcher:
         self.verbose = verbose
         self.excel_reader = ExcelReader(verbose=verbose)
         self.extractor = DmartProductDataExtractor()
+        self.ref_loader = RefProductDataLoader(date_str=date_str)
         self.checker = DmartLocationChecker()
         self.verbose = verbose
         self.init_paths()
@@ -210,21 +212,23 @@ class DmartExtractBatcher:
                 product_info, product_info_path = self.load_product_info(
                     product_id=product_id, location_name=location_name
                 )
-                err_mesg = (
-                    f"\n  * dmart.{location_name}.{product_id}: "
-                    f"\n  * {logstr.file(product_info_path)}"
-                )
                 try:
                     self.checker.check_product_location(
                         product_info, location_idx, extra_msg="DmartExtractBatcher"
                     )
                 except Exception as e:
-                    logger.warn(err_mesg)
-                    raise e
-                extracted_data = self.extractor.extract(product_info)
+                    logger.warn(
+                        f"    * Remove local file: [dmart.{location_name}.{product_id}]: "
+                        f"{logstr.file(brk(product_info_path))}"
+                    )
+                    product_info_path.unlink(missing_ok=True)
+                    # raise e
+                ref_mrp = self.ref_loader.load(
+                    location_name=location_name, idx=link_idx, key="mrp"
+                )
+                extracted_data = self.extractor.extract(product_info, ref_mrp=ref_mrp)
                 if not extracted_data:
-                    logger.warn(err_mesg)
-                    logger.warn(f"  × Empty extracted data")
+                    row_dicts.append({})
                     continue
                 row_dicts.append(extracted_data)
             output_path = self.get_output_path(location_name)
