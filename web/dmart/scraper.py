@@ -257,7 +257,11 @@ class DmartProductDataExtractor:
             logger.exit_quiet(not self.verbose)
             return {
                 "product_id": product_id,
-                "in_stock": "N/A",
+                # in_stock="" means page is "Currently Unavailable".
+                # From the perspective of software engineering,
+                # it should not be set to "" as it would cause ambiguity,
+                # but the customer requires so.
+                "in_stock": "",
                 "location": location,
             }
 
@@ -275,7 +279,11 @@ class DmartProductDataExtractor:
         product_name = dict_get(sku, "name", "")
 
         # get in_stock flag
-        in_stock_flag = 1
+        inv_type = dict_get(sku, "invType", "")
+        if inv_type.lower() == "a":
+            in_stock_flag = 1
+        else:
+            in_stock_flag = 0
 
         # get price, mrp, unit
         price = dict_get(sku, "priceSALE", None)
