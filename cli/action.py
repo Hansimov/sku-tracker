@@ -2,7 +2,7 @@ import argparse
 import sys
 
 from acto import Perioder
-from tclogger import shell_cmd
+from tclogger import shell_cmd, str_to_t
 
 from configs.envs import LOGS_ROOT, WEBSITE_NAMES, WEBSITE_LITERAL
 
@@ -31,7 +31,7 @@ class ScrapeBatcherAction:
 
 class ExtractBatcherAction:
     def __init__(self):
-        self.pattern = "****-**-** 15:45:00"
+        self.pattern = "****-**-** 17:00:00"
         self.perioder = Perioder(
             self.pattern, log_path=LOGS_ROOT / f"action_extract_batcher.log"
         )
@@ -44,9 +44,21 @@ class ExtractBatcherAction:
             "python -m file.excel_merger -m -k",
             "python -m file.email",
         ]
+        self.cmds_weekly = [
+            "python -m file.excel_merger -p",
+            "python -m file.email -t weekly",
+        ]
+
+    def add_cmds_weekly(self):
+        run_dt = str_to_t(self.run_dt_str)
+        weekday = run_dt.weekday()
+        if weekday == 6:  # Sunday
+            self.func_strs.extend(self.cmds_weekly)
 
     def desc_func(self, run_dt_str: str):
+        self.run_dt_str = run_dt_str
         self.func_strs = [*self.cmds_extract, *self.cmds_file]
+        self.add_cmds_weekly()
         self.desc_str = "\n".join(self.func_strs)
         return self.func_strs, self.desc_str
 
