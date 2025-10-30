@@ -224,27 +224,35 @@ class ZeptoResponseParser:
             # Primitive type - return as is
             return resp
 
+    def pick_resp(self, resp: Union[list, dict]) -> dict:
+        if isinstance(resp, list):
+            resp = resp[-1]
+        resp = dict_get(resp, ["children", -1], {})
+        return resp
+
     def reduce_resp(self, resp: dict) -> dict:
-        res = dict_get(resp, ["children", -1], {})
-        # widgets = dict_get(res, ["pageLayout", "widgets"], [])
-        dict_set(res, "pageLayout.widgets", [])
-        dict_set(res, "pageLayout.header.Widget", {})
+        # widgets = dict_get(resp, ["pageLayout", "widgets"], [])
+        dict_set(resp, "pageLayout.widgets", [])
+        dict_set(resp, "pageLayout.header.Widget", {})
         dict_set(
-            res,
+            resp,
             "pageLayout.header.widget.data.productInfo.productVariant.l4AttributesResponse",
             {},
         )
         dict_set(
-            res, "pageLayout.header.widget.data.productInfo.productVariant.images", []
+            resp, "pageLayout.header.widget.data.productInfo.productVariant.images", []
         )
-        dict_set(res, "pageLayout.pageData", {})
-        dict_set(res, "pageLayout.pageMeta", {})
-        dict_set(res, "pageLayout.header.widget.data.productInfo.storeProduct.meta", {})
-        dict_set(res, "externalVendorServiceabilityInfo", {})
-        return res
+        dict_set(resp, "pageLayout.pageData", {})
+        dict_set(resp, "pageLayout.pageMeta", {})
+        dict_set(
+            resp, "pageLayout.header.widget.data.productInfo.storeProduct.meta", {}
+        )
+        dict_set(resp, "externalVendorServiceabilityInfo", {})
+        return resp
 
     def clean_resp(self, resp: list) -> dict:
         resp = self.flatten_resp(resp)
+        resp = self.pick_resp(resp)
         resp = self.reduce_resp(resp)
         return resp
 
