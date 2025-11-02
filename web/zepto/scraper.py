@@ -112,6 +112,7 @@ class ZeptoLocationSwitcher:
             location_text = location_dict.get("text", "")
             logger.file(f"  * {location_name} ({location_text})")
 
+            # # if no trick works, try clear cache
             # logger.mesg(f"  * Clear cache (cookies, local_storage) ...")
             # tab.clear_cache()
 
