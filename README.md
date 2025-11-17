@@ -96,17 +96,17 @@ export DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none
 Scrape items of different websites:
 
 ```sh
-python -m web.zepto.batcher -s
-python -m web.blinkit.batcher -s
-python -m web.dmart.batcher -s
-python -m web.swiggy.batcher -s
+DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none python -m web.blinkit.batcher -s
+DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none python -m web.zepto.batcher -s
+DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none python -m web.dmart.batcher -s
+DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=none python -m web.swiggy.batcher -s
 ```
 
 Extract items of different websites:
 
 ```sh
-python -m web.zepto.batcher -e
 python -m web.blinkit.batcher -e
+python -m web.zepto.batcher -e
 python -m web.dmart.batcher -e
 python -m web.swiggy.batcher -e
 ```
