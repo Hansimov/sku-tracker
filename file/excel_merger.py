@@ -414,7 +414,7 @@ class ExcelChecker:
             json.dump(log_res, wf, indent=4, ensure_ascii=False)
         logger.file(f"  * {self.log_path}")
 
-    def check(self, verbose: bool = False) -> dict:
+    def check(self, verbose: bool = False) -> list[dict]:
         """
         Example output:
         [
@@ -434,7 +434,7 @@ class ExcelChecker:
         logger.file(f"  * {self.xlsx_path}")
         if not self.xlsx_path.exists():
             logger.warn(f"  × Excel does not exist!")
-            return False
+            return []
         res = []
         df = read_df_from_xlsx(self.xlsx_path)
         df_columns = df.columns.tolist()

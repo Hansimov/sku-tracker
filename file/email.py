@@ -59,7 +59,6 @@ class EmailSender:
             self.get_weekly_report_path()
         else:
             self.get_daily_report_path()
-
         self.check_output()
 
     def init_emailer(self):
@@ -72,24 +71,21 @@ class EmailSender:
 
     def create_subject_and_body(self):
         username = self.configs.get("username", "")
-
-        if self.task == "weekly":
-            title = f"WW{self.date_week} ({self.date_beg_str} - {self.date_end_str})"
-            subject_str = f"[SKU Weekly Summary] [{self.date_str}] {title}"
-        else:
-            subject_str = f"[SKU Daily Report] [{self.date_str}]"
-
         check_res = self.checker.check()
+        date_str = f"[{self.date_str}]"
+        count_str = f" ({len(check_res)} issues)"
+        if self.task == "weekly":
+            ww_title = f"WW{self.date_week} ({self.date_beg_str} - {self.date_end_str})"
+            subject_str = f"[SKU Weekly Summary] {date_str} {ww_title}{count_str}"
+        else:
+            subject_str = f"[SKU Daily Report] {date_str} {count_str}"
         check_res_str = self.checker.format_check_res(check_res)
-
         file_str = f"File: <b>{self.report_path.name}</b>"
         from_str = f"From: <b>{username}</b>"
         sent_str = f"Sent: {get_now_str()}"
         logs_str = f"Logs: <b>{self.checker.log_path.name}</b>"
         issue_str = f"Issues: <br/><pre>{check_res_str}</pre>"
-
         body_str = " <br/> ".join([file_str, from_str, sent_str, logs_str, issue_str])
-
         res = {
             "subject": subject_str,
             "body": body_str,
