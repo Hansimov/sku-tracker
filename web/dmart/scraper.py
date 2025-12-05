@@ -310,11 +310,18 @@ class DmartProductDataExtractor:
         ref_price: Union[float, int],
         max_diff_ratio: float = 0.5,
     ) -> bool:
-        ratio = abs(price - ref_price) / min(price, ref_price)
+        if price is None or ref_price is None:
+            return False
+        min_price = min(price, ref_price)
+        if min_price <= 0:
+            return False
+        ratio = abs(price - ref_price) / min_price
         return ratio < max_diff_ratio
 
     def check_by_ref(self, res: dict, ref_mrp: Union[int, float] = None) -> bool:
         mrp = res.get("mrp", None)
+        if mrp is None or ref_mrp is None or min(mrp, ref_mrp) <= 0:
+            return False
         if not self.is_price_close(mrp, ref_mrp):
             product_id = res.get("product_id", "")
             diff = abs(mrp - ref_mrp) / min(mrp, ref_mrp)
